@@ -13,6 +13,7 @@ const path = require('path');
 const fs = require('fs');
 const nodemailer = require('nodemailer');
 const app = express();
+app.use(express.static(path.join(__dirname, 'public')));
 const PizZip = require('pizzip');
 const Docxtemplater = require('docxtemplater');
 const JSZipUtils = require('jszip-utils');

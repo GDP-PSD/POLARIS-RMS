@@ -1736,6 +1736,8 @@
       
   <script>
 
+const BASE_URL = window.location.origin;
+
 // Object to track failed attempts
 const loginAttempts = {
   users: {}, // { username: { attempts: number, locked: boolean, lockTime: timestamp } }
@@ -1810,7 +1812,7 @@ function stopInactivityTimeout() {
 }
 
     function checkSession(callback) {
-  fetch('http://127.0.0.1:3000/session-status', { credentials: 'include' })
+  fetch(`${BASE_URL}/session-status`, { credentials: 'include' })
     .then(response => {
       console.log('Session status:', response.status);
       if (!response.ok) throw new Error('Fetch failed: ' + response.status);
@@ -1956,7 +1958,7 @@ function login() {
     return;
   }
 
-  fetch('http://127.0.0.1:3000/login', {
+  fetch(`${BASE_URL}/login`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ username, password }),
@@ -1981,7 +1983,7 @@ function login() {
 
         // Log disclaimer agreement to audit
         console.log('Attempting to log disclaimer agreement for', username);
-        fetch('http://127.0.0.1:3000/audit/extract', {
+        fetch(`${BASE_URL}/audit/extract`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
@@ -2097,7 +2099,7 @@ document.addEventListener('DOMContentLoaded', () => {
         document.getElementById('reset-error').innerText = 'Please enter a new password';
         return;
       }
-      fetch('http://127.0.0.1:3000/reset-password', {
+      fetch(`${BASE_URL}/reset-password`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ newPassword }),
@@ -2130,7 +2132,7 @@ document.addEventListener('DOMContentLoaded', () => {
         document.getElementById('login-error').innerText = 'Please enter both username and email';
         return;
       }
-      fetch('http://127.0.0.1:3000/request-password-reset', {
+      fetch(`${BASE_URL}/request-password-reset`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ username, email })
@@ -2153,7 +2155,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     function logout() {
   console.log('Logging out');
-  fetch('http://127.0.0.1:3000/logout', {
+  fetch(`${BASE_URL}/logout`, {
     method: 'POST',
     credentials: 'include'
   })
@@ -2276,7 +2278,7 @@ function changePassword() {
     return;
   }
 
-  fetch('http://127.0.0.1:3000/change-password', {
+  fetch(`${BASE_URL}/change-password`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ username, newPassword }),
@@ -2377,7 +2379,7 @@ function loadCases() {
     console.log('Not logged in, skipping loadCases');
     return;
   }
-  fetch('http://127.0.0.1:3000/cases', { credentials: 'include' })
+  fetch(`${BASE_URL}/cases`, { credentials: 'include' })
     .then(response => {
       if (!response.ok) throw new Error('Fetch failed: ' + response.status);
       return response.json();
@@ -2922,7 +2924,7 @@ function addCase() {
     }
   }
 
-  fetch('http://127.0.0.1:3000/cases', {
+  fetch(`${BASE_URL}/cases`, {
     method: 'POST',
     body: formData,
     credentials: 'include'
@@ -3119,7 +3121,7 @@ function saveEditedCase() {
 
 
 function loadDetailedStats() {
-  fetch('http://127.0.0.1:3000/detailed-stats', { credentials: 'include' })
+  fetch(`${BASE_URL}/detailed-stats`, { credentials: 'include' })
     .then(response => {
       if (!response.ok) throw new Error('Failed to fetch stats: ' + response.status);
       return response.json();
@@ -3225,7 +3227,7 @@ function loadCharts() {
     }
   });
 
-  fetch('http://127.0.0.1:3000/detailed-stats', { credentials: 'include' })
+  fetch(`${BASE_URL}/detailed-stats`, { credentials: 'include' })
     .then(response => {
       if (!response.ok) throw new Error('Failed to fetch stats: ' + response.status);
       return response.json();
@@ -3605,7 +3607,7 @@ function loadCharts() {
   console.log('Searching for staff number:', staffNo);
 
   // Log staff search action
-  fetch('http://127.0.0.1:3000/audit/search-staff', {
+  fetch(`${BASE_URL}/audit/search-staff`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ staffNo }),
@@ -3644,7 +3646,7 @@ function exportStaffCases() {
     return;
   }
 
-  fetch('http://127.0.0.1:3000/audit/extract', {
+  fetch(`${BASE_URL}/audit/extract`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ type: 'staff', identifier: 'staff_cases' }),
@@ -3762,7 +3764,7 @@ function exportStatsSection(data, key, filename, customHeader = key.charAt(0).to
     return;
   }
 
-  fetch('http://127.0.0.1:3000/audit/extract', {
+  fetch(`${BASE_URL}/audit/extract`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ type: 'case', identifier: filename.split('.')[0] }),
@@ -3795,7 +3797,7 @@ function exportStatsSection(data, key, filename, customHeader = key.charAt(0).to
 
 function exportAllStats() {
   console.log('Exporting all stats...');
-  fetch('http://127.0.0.1:3000/detailed-stats', { credentials: 'include' })
+  fetch(`${BASE_URL}/detailed-stats`, { credentials: 'include' })
     .then(response => {
       if (!response.ok) throw new Error('Failed to fetch stats: ' + response.status);
       return response.json();
@@ -3934,7 +3936,7 @@ function createUser() {
     document.getElementById('user-create-result').innerText = 'PSD Admin cannot create PSD Admin or Admin users';
     return;
   }
-  fetch('http://127.0.0.1:3000/admin/users', {
+  fetch(`${BASE_URL}/admin/users`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ username, role, email, name }), // Include name
@@ -3956,7 +3958,7 @@ function createUser() {
 
 function loadUsers() {
   if (!isLoggedIn || (userRole !== 'admin' && userRole !== 'psd admin')) return;
-  fetch('http://127.0.0.1:3000/admin/users', { credentials: 'include' })
+  fetch(`${BASE_URL}/admin/users`, { credentials: 'include' })
     .then(response => {
       if (!response.ok) throw new Error('Users fetch failed: ' + response.status);
       return response.json();
@@ -4057,7 +4059,7 @@ function saveUser(oldUsername) {
     document.getElementById('login-error').innerText = 'Please enter both username and email';
     return;
   }
-  fetch('http://127.0.0.1:3000/request-password-reset', {
+  fetch(`${BASE_URL}/request-password-reset`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ username, email })
@@ -4130,7 +4132,7 @@ function deleteUser(username) {
 
 function loadAuditReport() {
   if (!isLoggedIn || (userRole !== 'admin' && userRole !== 'psd admin')) return;
-  fetch('http://127.0.0.1:3000/audit', { credentials: 'include' })
+  fetch(`${BASE_URL}/audit`, { credentials: 'include' })
     .then(response => {
       if (!response.ok) throw new Error('Audit fetch failed: ' + response.status);
       return response.json();
@@ -4158,7 +4160,7 @@ function loadAuditReport() {
 
     function exportAuditReport() {
       if (!isLoggedIn || userRole !== 'admin') return;
-      fetch('http://127.0.0.1:3000/audit', { credentials: 'include' })
+      fetch(`${BASE_URL}/audit`, { credentials: 'include' })
         .then(response => response.json())
         .then(logs => {
           let csv = 'ID,User,Action,Details,Timestamp\n';
@@ -4218,7 +4220,7 @@ function updateAdminTabs() {
 
 function loadErrorLogs() {
   if (!isLoggedIn || userRole !== 'admin') return;
-  fetch('http://127.0.0.1:3000/error-logs', { credentials: 'include' })
+  fetch(`${BASE_URL}/error-logs`, { credentials: 'include' })
     .then(response => {
       if (!response.ok) throw new Error(`Failed to fetch error logs: ${response.status}`);
       return response.json();
@@ -4260,7 +4262,7 @@ function submitErrorReport() {
     alert('Please describe the error');
     return;
   }
-  fetch('http://127.0.0.1:3000/report-error', {
+  fetch(`${BASE_URL}/report-error`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ errorDescription }),
@@ -4285,7 +4287,7 @@ Chart.register(ChartDataLabels);
 
 function loadOfficers() {
   console.log('Loading officers for role:', userRole);
-  fetch('http://127.0.0.1:3000/officers', { credentials: 'include' })
+  fetch(`${BASE_URL}/officers`, { credentials: 'include' })
     .then(response => {
       if (!response.ok) {
         throw new Error(`Failed to fetch officers: ${response.status}`);
@@ -4343,7 +4345,7 @@ function displayOfficers(officers) {
 
 function searchOfficers() {
   const query = document.getElementById('officer-search').value.toLowerCase();
-  fetch('http://127.0.0.1:3000/officers', { credentials: 'include' })
+  fetch(`${BASE_URL}/officers`, { credentials: 'include' })
     .then(response => response.json())
     .then(officers => {
       console.log('Officers received:', officers);
@@ -4674,7 +4676,7 @@ function generateDisclosureReport() {
     return;
   }
 
-  fetch('http://127.0.0.1:3000/generate-disclosure-report', {
+  fetch(`${BASE_URL}/generate-disclosure-report`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(data),
@@ -4777,7 +4779,7 @@ document.getElementById('permission-form').addEventListener('submit', async (e) 
   console.log('Sending permissions:', formData);
 
   try {
-    const response = await fetch('http://127.0.0.1:3000/admin/permissions', {
+    const response = await fetch(`${BASE_URL}/admin/permissions`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(formData),
@@ -4855,7 +4857,7 @@ function loadPermissions() {
   if (!isLoggedIn || (userRole !== 'admin' && userRole !== 'psd admin')) return;
 
   // Fetch PSD users
-  fetch('http://127.0.0.1:3000/admin/users', { credentials: 'include' })
+  fetch(`${BASE_URL}/admin/users`, { credentials: 'include' })
     .then(response => {
       if (!response.ok) throw new Error('Users fetch failed');
       return response.json();
@@ -4869,7 +4871,7 @@ function loadPermissions() {
     .catch(error => console.error('Load PSD users error:', error));
 
   // Fetch cases
-  fetch('http://127.0.0.1:3000/cases', { credentials: 'include' })
+  fetch(`${BASE_URL}/cases`, { credentials: 'include' })
     .then(response => {
       if (!response.ok) throw new Error('Cases fetch failed');
       return response.json();
@@ -4882,7 +4884,7 @@ function loadPermissions() {
     .catch(error => console.error('Load cases error:', error));
 
   // Fetch current permissions
-  fetch('http://127.0.0.1:3000/admin/permissions', { credentials: 'include' })
+  fetch(`${BASE_URL}/admin/permissions`, { credentials: 'include' })
     .then(response => {
       if (!response.ok) throw new Error('Permissions fetch failed');
       return response.json();

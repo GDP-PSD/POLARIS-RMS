@@ -263,6 +263,14 @@ async function setupDatabase() {
       )
     `);
 
+    await db.run(`
+      CREATE TABLE IF NOT EXISTS ip_blocks (
+        ip TEXT PRIMARY KEY,
+        reason TEXT,
+        blocked_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      )
+    `);
+
     // Initial data setup
     const caseCount = await db.get('SELECT COUNT(*) as count FROM cases');
     if (caseCount.count === 0) {
@@ -1077,17 +1085,7 @@ async function initDb() {
     driver: sqlite3.Database
   });
   await db.run('PRAGMA foreign_keys = ON');
-  // Ensure audit_logs exists
-  await db.run(`
-    CREATE TABLE IF NOT EXISTS audit_logs (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      user TEXT NOT NULL,
-      action TEXT NOT NULL,
-      details TEXT,
-      timestamp TEXT DEFAULT CURRENT_TIMESTAMP
-    )
-  `);
-  return db;
+
 }
 
 app.put('/cases/:id', restrictToPSDOrHigher, upload.array('files'), async (req, res) => {

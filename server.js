@@ -92,6 +92,11 @@ const db = new sqlite3.Database(process.env.DB_PATH, (err) => {
   }
 });
 
+db.all("SELECT name FROM sqlite_master WHERE type='table';", (err, tables) => {
+  if (err) console.error('Error listing tables:', err);
+  else console.log('Tables in database:', tables.map(t => t.name));
+});
+
 // File upload setup
 const uploadDir = process.env.UPLOAD_PATH;
 if (!fs.existsSync(uploadDir)) {

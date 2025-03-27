@@ -734,27 +734,31 @@
       <div class="login-container">
         <!-- Left: Login Form -->
         <div class="login-form">
-          <div class="form-group">
-            <label for="username">Username</label>
-            <input id="username" placeholder="Enter username">
-          </div>
-          <div class="form-group">
-            <label for="password">Password</label>
-            <input id="password" type="password" placeholder="Enter password">
-            <input type="hidden" id="client-ip" value=" simulated-ip "> <!-- Placeholder -->
-          </div>
-          <button onclick="login()" id="login-btn" disabled>Log In</button>
+          <form id="login-form" onsubmit="login(); return false;">
+            <div class="form-group">
+              <label for="username">Username</label>
+              <input id="username" placeholder="Enter username">
+            </div>
+            <div class="form-group">
+              <label for="password">Password</label>
+              <input id="password" type="password" placeholder="Enter password">
+              <input type="hidden" id="client-ip" value=" simulated-ip "> <!-- Placeholder -->
+            </div>
+            <button type="submit" id="login-btn" disabled>Log In</button>
+          </form>
           <p><a href="#" onclick="showResetRequest()">Forgot Password?</a></p>
           <div id="reset-request" style="display: none;">
-            <div class="form-group">
-              <label for="reset-username">Username</label>
-              <input id="reset-username" placeholder="Enter username">
-            </div>
-            <div class="form-group">
-              <label for="reset-email">Email</label>
-              <input id="reset-email" placeholder="Enter email">
-            </div>
-            <button onclick="requestPasswordReset()">Request Reset</button>
+            <form id="reset-request-form" onsubmit="requestPasswordReset(); return false;">
+              <div class="form-group">
+                <label for="reset-username">Username</label>
+                <input id="reset-username" placeholder="Enter username">
+              </div>
+              <div class="form-group">
+                <label for="reset-email">Email</label>
+                <input id="reset-email" placeholder="Enter email">
+              </div>
+              <button type="submit">Request Reset</button>
+            </form>
           </div>
           <p id="login-error"></p>
         </div>
@@ -778,16 +782,18 @@
           </div>
         </div>
       </div>
-     </div>
-
+    </div>
+    
     <div id="reset-password-section">
       <h2>Reset Password</h2>
       <p>Please set a new password.</p>
-      <div class="form-group">
-        <label for="new-password">New Password</label>
-        <input id="new-password" type="password" placeholder="Enter new password">
-      </div>
-      <button onclick="resetPassword()">Set Password</button>
+      <form id="reset-password-form" onsubmit="resetPassword(); return false;">
+        <div class="form-group">
+          <label for="new-password">New Password</label>
+          <input id="new-password" type="password" placeholder="Enter new password">
+        </div>
+        <button type="submit">Set Password</button>
+      </form>
       <p id="reset-error"></p>
     </div>
 

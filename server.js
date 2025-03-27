@@ -13,6 +13,7 @@ const path = require('path');
 const fs = require('fs');
 const nodemailer = require('nodemailer');
 const app = express();
+app.set('trust proxy', 1);
 app.use(express.static(path.join(__dirname, 'public')));
 const PizZip = require('pizzip');
 const Docxtemplater = require('docxtemplater');

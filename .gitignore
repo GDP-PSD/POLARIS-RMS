@@ -1,0 +1,7 @@
+C:\Users\nvict\Desktop\Polaris - Copy>echo node_modules/ > .gitignore
+C:\Users\nvict\Desktop\Polaris - Copy>echo .env >> .gitignore
+C:\Users\nvict\Desktop\Polaris - Copy>echo cases.db >> .gitignore
+C:\Users\nvict\Desktop\Polaris - Copy>echo uploads/ >> .gitignore
+C:\Users\nvict\Desktop\Polaris - Copy>echo sessions/ >> .gitignore
+C:\Users\nvict\Desktop\Polaris - Copy>echo backups/ >> .gitignore
+C:\Users\nvict\Desktop\Polaris - Copy>git add .gitignore

@@ -23,6 +23,18 @@ const PizZip = require('pizzip');
 const Docxtemplater = require('docxtemplater');
 const JSZipUtils = require('jszip-utils');
 const cloudinary = require('cloudinary').v2;
+const casesPerYear = stats.casesPerYear || [];
+const severity = stats.severity || [];
+const raAssessment = stats.raAssessment || [];
+const misconductOutcome = stats.misconductOutcome || [];
+const hearingOutcome = stats.hearingOutcome || [];
+const appealsPerYear = stats.appealsPerYear || [];
+const appealOutcome = stats.appealOutcome|| [];
+const caseStatus = stats.caseStatus || [];
+const breachesOfStandards = stats.breachesOfStandards || [];
+const officerAgeAtIncident = stats.officerAgeAtIncident || [];
+const serviceLengthAtIncident = stats.serviceLengthAtIncident || [];
+const chartInstances = {};
 
 // Configuration
 const MAX_USER_ATTEMPTS = 5;

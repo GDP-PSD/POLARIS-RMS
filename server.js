@@ -33,8 +33,6 @@ const redisClient = redis.createClient({
 redisClient.on('error', err => console.error('Redis Client Error:', err));
 redisClient.connect().then(() => console.log('Connected to Redis'));
 
-// Encode the password to handle special characters like @
-
 // Middleware setup
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
@@ -64,7 +62,13 @@ app.use((req, res, next) => {
 const rateLimit = require('express-rate-limit');
 app.use('/login', rateLimit({ windowMs: 15 * 60 * 1000, max: 50 }));
 
+// Serve static files from 'public' folder (NEW)
+app.use(express.static(path.join(__dirname, 'public')));
+
+// Serve static files from 'uploads' folder (existing)
 app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
+
+// Logging middleware
 app.use((req, res, next) => {
   console.log('--- Request Start ---');
   console.log('URL:', req.url);
@@ -77,7 +81,17 @@ app.use((req, res, next) => {
   next();
 });
 
+// Example route to test (add this if not already present)
+app.get('/session-status', (req, res) => {
+  res.json({ status: 'active', message: 'Session is valid' });
+});
+
 console.log('Registering routes...');
+
+// Start the server
+app.listen(PORT, HOST, () => {
+  console.log(`POLARIS RMS Version 1 Server running on http://${HOST}:${PORT}`);
+});
 
 // Database connection with foreign keys enabled
 const db = new sqlite3.Database(process.env.DB_PATH, (err) => {
@@ -2022,11 +2036,6 @@ app.use((err, req, res, next) => {
 app.use((req, res) => {
   console.log('404 - Method:', req.method, 'URL:', req.url);
   res.status(404).json({ error: 'Route not found' });
-});
-
-// Start server
-app.listen(PORT, HOST, () => {
-  console.log(`POLARIS RMS Version 1 Server running on http://${HOST}:${PORT}`);
 });
 
 process.on('SIGINT', () => {

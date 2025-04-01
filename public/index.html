@@ -734,31 +734,27 @@
       <div class="login-container">
         <!-- Left: Login Form -->
         <div class="login-form">
-          <form id="login-form" onsubmit="login(); return false;">
-            <div class="form-group">
-              <label for="username">Username</label>
-              <input id="username" type="text" placeholder="Enter username" autocomplete="username">
-            </div>
-            <div class="form-group">
-              <label for="password">Password</label>
-              <input id="password" type="password" placeholder="Enter password" autocomplete="current-password" fdprocessedid="uiskok">
-              <input type="hidden" id="client-ip" value=" simulated-ip "> <!-- Placeholder -->
-            </div>
-            <button type="submit" id="login-btn" disabled>Log In</button>
-          </form>
+          <div class="form-group">
+            <label for="username">Username</label>
+            <input id="username" placeholder="Enter username">
+          </div>
+          <div class="form-group">
+            <label for="password">Password</label>
+            <input id="password" type="password" placeholder="Enter password">
+            <input type="hidden" id="client-ip" value=" simulated-ip "> <!-- Placeholder -->
+          </div>
+          <button onclick="login()" id="login-btn" disabled>Log In</button>
           <p><a href="#" onclick="showResetRequest()">Forgot Password?</a></p>
           <div id="reset-request" style="display: none;">
-            <form id="reset-request-form" onsubmit="requestPasswordReset(); return false;">
-              <div class="form-group">
-                <label for="reset-username">Username</label>
-                <input id="reset-username" placeholder="Enter username">
-              </div>
-              <div class="form-group">
-                <label for="reset-email">Email</label>
-                <input id="reset-email" placeholder="Enter email">
-              </div>
-              <button type="submit">Request Reset</button>
-            </form>
+            <div class="form-group">
+              <label for="reset-username">Username</label>
+              <input id="reset-username" placeholder="Enter username">
+            </div>
+            <div class="form-group">
+              <label for="reset-email">Email</label>
+              <input id="reset-email" placeholder="Enter email">
+            </div>
+            <button onclick="requestPasswordReset()">Request Reset</button>
           </div>
           <p id="login-error"></p>
         </div>
@@ -782,18 +778,16 @@
           </div>
         </div>
       </div>
-    </div>
-    
+     </div>
+
     <div id="reset-password-section">
       <h2>Reset Password</h2>
       <p>Please set a new password.</p>
-      <form id="reset-password-form" onsubmit="resetPassword(); return false;">
-        <div class="form-group">
-          <label for="new-password">New Password</label>
-          <input id="new-password" type="password" placeholder="Enter new password" autocomplete="new-password">
-        </div>
-        <button type="submit">Set Password</button>
-      </form>
+      <div class="form-group">
+        <label for="new-password">New Password</label>
+        <input id="new-password" type="password" placeholder="Enter new password">
+      </div>
+      <button onclick="resetPassword()">Set Password</button>
       <p id="reset-error"></p>
     </div>
 
@@ -1035,28 +1029,28 @@
             <canvas id="casesPerYearBarChart"></canvas>
           </div>
           <div class="chart-container">
-            <canvas id="severityBarChart"></canvas>
+            <canvas id="severityPieChart"></canvas>
           </div>
           <div class="chart-container">
-            <canvas id="raAssessmentBarChart"></canvas>
+            <canvas id="raAssessmentPieChart"></canvas>
           </div>
           <div class="chart-container">
-            <canvas id="misconductOutcomeBarChart"></canvas>
+            <canvas id="misconductOutcomePieChart"></canvas>
           </div>
           <div class="chart-container">
-            <canvas id="hearingOutcomeBarChart"></canvas>
+            <canvas id="hearingOutcomePieChart"></canvas>
           </div>
           <div class="chart-container">
             <canvas id="appealsPerYearBarChart"></canvas>
           </div>
           <div class="chart-container">
-            <canvas id="appealOutcomeBarChart"></canvas>
+            <canvas id="appealOutcomePieChart"></canvas>
           </div>
           <div class="chart-container">
-            <canvas id="caseStatusBarChart"></canvas>
+            <canvas id="caseStatusPieChart"></canvas>
           </div>
           <div class="chart-container">
-            <canvas id="breachesOfStandardsBarChart"></canvas>
+            <canvas id="breachesOfStandardsPieChart"></canvas>
           </div>
           <div class="chart-container">
             <canvas id="officerAgeBarChart"></canvas>
@@ -3212,9 +3206,9 @@ function loadDetailedStats() {
 
 function loadCharts() {
   const chartIds = [
-    'casesPerYearBarChart', 'severityBarChart', 'raAssessmentBarChart',
-    'misconductOutcomeBarChart', 'hearingOutcomeBarChart', 'appealsPerYearBarChart',
-    'appealOutcomeBarChart', 'caseStatusBarChart', 'breachesOfStandardsBarChart',
+    'casesPerYearBarChart', 'severityPieChart', 'raAssessmentPieChart',
+    'misconductOutcomePieChart', 'hearingOutcomePieChart', 'appealsPerYearBarChart',
+    'appealOutcomePieChart', 'caseStatusPieChart', 'breachesOfStandardsPieChart',
     'officerAgeBarChart', 'serviceLengthBarChart'
   ];
 
@@ -3278,7 +3272,7 @@ function loadCharts() {
       }, {});
       const severityYears = Object.keys(severityByYear).sort();
       const severityTypes = [...new Set(stats.severity.map(d => d.severity))];
-      chartInstances['severityBarChart'] = new Chart(document.getElementById('severityBarChart'), {
+      chartInstances['severityPieChart'] = new Chart(document.getElementById('severityPieChart'), {
         type: 'bar',
         data: {
           labels: severityYears,
@@ -3304,7 +3298,7 @@ function loadCharts() {
       }, {});
       const raYears = Object.keys(raByYear).sort();
       const raTypes = [...new Set(stats.raAssessment.map(d => d.raAssessment))];
-      chartInstances['raAssessmentBarChart'] = new Chart(document.getElementById('raAssessmentBarChart'), {
+      chartInstances['raAssessmentPieChart'] = new Chart(document.getElementById('raAssessmentPieChart'), {
         type: 'bar',
         data: {
           labels: raYears,
@@ -3330,7 +3324,7 @@ function loadCharts() {
       }, {});
       const misconductYears = Object.keys(misconductByYear).sort();
       const misconductTypes = [...new Set(stats.misconductOutcome.map(d => d.misconductOutcome))];
-      chartInstances['misconductOutcomeBarChart'] = new Chart(document.getElementById('misconductOutcomeBarChart'), {
+      chartInstances['misconductOutcomePieChart'] = new Chart(document.getElementById('misconductOutcomePieChart'), {
         type: 'bar',
         data: {
           labels: misconductYears,
@@ -3356,7 +3350,7 @@ function loadCharts() {
       }, {});
       const hearingYears = Object.keys(hearingByYear).sort();
       const hearingTypes = [...new Set(stats.hearingOutcome.map(d => d.hearingOutcome))];
-      chartInstances['hearingOutcomeBarChart'] = new Chart(document.getElementById('hearingOutcomeBarChart'), {
+      chartInstances['hearingOutcomePieChart'] = new Chart(document.getElementById('hearingOutcomePieChart'), {
         type: 'bar',
         data: {
           labels: hearingYears,
@@ -3401,7 +3395,7 @@ function loadCharts() {
       }, {});
       const appealOutcomeYears = Object.keys(appealOutcomeByYear).sort();
       const appealOutcomeTypes = [...new Set(stats.appealOutcome.map(d => d.appealOutcome))];
-      chartInstances['appealOutcomeBarChart'] = new Chart(document.getElementById('appealOutcomeBarChart'), {
+      chartInstances['appealOutcomePieChart'] = new Chart(document.getElementById('appealOutcomePieChart'), {
         type: 'bar',
         data: {
           labels: appealOutcomeYears,
@@ -3427,7 +3421,7 @@ function loadCharts() {
       }, {});
       const statusYears = Object.keys(statusByYear).sort();
       const statusTypes = [...new Set(stats.caseStatus.map(d => d.status))];
-      chartInstances['caseStatusBarChart'] = new Chart(document.getElementById('caseStatusBarChart'), {
+      chartInstances['caseStatusPieChart'] = new Chart(document.getElementById('caseStatusPieChart'), {
         type: 'bar',
         data: {
           labels: statusYears,
@@ -3453,7 +3447,7 @@ function loadCharts() {
       }, {});
       const breachesYears = Object.keys(breachesByYear).sort();
       const breachesTypes = [...new Set(stats.breachesOfStandards.map(d => d.breachOfStandards))];
-      chartInstances['breachesOfStandardsBarChart'] = new Chart(document.getElementById('breachesOfStandardsBarChart'), {
+      chartInstances['breachesOfStandardsPieChart'] = new Chart(document.getElementById('breachesOfStandardsPieChart'), {
         type: 'bar',
         data: {
           labels: breachesYears,
@@ -3555,7 +3549,7 @@ function loadCharts() {
       });
     }
 
-    function createBarChart(canvasId, title, data, key) {
+    function createPieChart(canvasId, title, data, key) {
       const ctx = document.getElementById(canvasId).getContext('2d');
       if (chartInstances[canvasId]) chartInstances[canvasId].destroy();
       chartInstances[canvasId] = new Chart(ctx, {
@@ -3606,7 +3600,6 @@ function loadCharts() {
   }
   const staffNo = document.getElementById('staff-search-input').value.trim();
   if (!staffNo) {
-    console.log('Staff number empty, clearing table');
     document.getElementById('staff-case-list').getElementsByTagName('tbody')[0].innerHTML = '';
     staffCases = [];
     return;
@@ -3626,17 +3619,15 @@ function loadCharts() {
       console.log('Staff cases response status:', response.status);
       if (!response.ok) {
         console.log('Fetch failed, status:', response.status);
-        throw new Error(`Fetch failed with status: ${response.status}`);
+        return null;
       }
       return response.json();
     })
     .then(cases => {
-      console.log('Staff cases received:', cases);
       if (cases) {
+        console.log('Staff cases received:', cases);
         staffCases = cases;
         displayStaffCases(cases);
-      } else {
-        console.log('No cases returned');
       }
     })
     .catch(error => console.error('Search staff error:', error));
@@ -4141,7 +4132,7 @@ function deleteUser(username) {
 
 function loadAuditReport() {
   if (!isLoggedIn || (userRole !== 'admin' && userRole !== 'psd admin')) return;
-  fetch(`${BASE_URL}/audit-logs`, { credentials: 'include' })
+  fetch(`${BASE_URL}/audit`, { credentials: 'include' })
     .then(response => {
       if (!response.ok) throw new Error('Audit fetch failed: ' + response.status);
       return response.json();
@@ -4169,7 +4160,7 @@ function loadAuditReport() {
 
     function exportAuditReport() {
       if (!isLoggedIn || userRole !== 'admin') return;
-      fetch(`${BASE_URL}/audit-logs`, { credentials: 'include' })
+      fetch(`${BASE_URL}/audit`, { credentials: 'include' })
         .then(response => response.json())
         .then(logs => {
           let csv = 'ID,User,Action,Details,Timestamp\n';
@@ -4353,17 +4344,17 @@ function displayOfficers(officers) {
 }
 
 function searchOfficers() {
-  const query = document.getElementById('officer-search').value;
-  fetch(`${BASE_URL}/search-officers?query=${encodeURIComponent(query)}`, { credentials: 'include' })
-    .then(response => {
-      if (!response.ok) throw new Error('Search failed: ' + response.status);
-      return response.json();
-    })
+  const query = document.getElementById('officer-search').value.toLowerCase();
+  fetch(`${BASE_URL}/officers`, { credentials: 'include' })
+    .then(response => response.json())
     .then(officers => {
-      console.log('Filtered officers received:', officers);
-      displayOfficers(officers);
+      console.log('Officers received:', officers);
+      const filtered = officers.filter(o => 
+        o.staffNo.toLowerCase().includes(query) || o.name.toLowerCase().includes(query)
+      );
+      displayOfficers(filtered);
     })
-    .catch(error => console.error('Error searching officers:', error));
+    .catch(error => console.error('Error fetching officers:', error));
 }
 
 function viewCase(caseId, officerId, allOfficers = false) {

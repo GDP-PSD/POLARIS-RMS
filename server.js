@@ -1,12 +1,8 @@
-require('dotenv').config({ path: 'C:/Users/nvict/Desktop/Polaris - Copy/.env' });
+require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
-const PORT = process.env.NODE_ENV === 'production' ? process.env.PORT : (process.env.PORT || 3000);
+const PORT = process.env.PORT || 3000;
 const HOST = process.env.HOST || '0.0.0.0';
-console.log('Full process.env:', process.env);
-console.log('Loaded PORT from env:', process.env.PORT); // Should print 3000
-console.log('Final PORT value:', PORT); // Should print 3000
-
 const session = require('express-session');
 const FileStore = require('session-file-store')(session);
 const bcrypt = require('bcrypt');
@@ -17,24 +13,10 @@ const path = require('path');
 const fs = require('fs');
 const nodemailer = require('nodemailer');
 const app = express();
-app.set('trust proxy', 1);
-app.use(express.static(path.join(__dirname, 'public')));
 const PizZip = require('pizzip');
 const Docxtemplater = require('docxtemplater');
 const JSZipUtils = require('jszip-utils');
 const cloudinary = require('cloudinary').v2;
-const casesPerYear = stats.casesPerYear || [];
-const severity = stats.severity || [];
-const raAssessment = stats.raAssessment || [];
-const misconductOutcome = stats.misconductOutcome || [];
-const hearingOutcome = stats.hearingOutcome || [];
-const appealsPerYear = stats.appealsPerYear || [];
-const appealOutcome = stats.appealOutcome|| [];
-const caseStatus = stats.caseStatus || [];
-const breachesOfStandards = stats.breachesOfStandards || [];
-const officerAgeAtIncident = stats.officerAgeAtIncident || [];
-const serviceLengthAtIncident = stats.serviceLengthAtIncident || [];
-const chartInstances = {};
 
 // Configuration
 const MAX_USER_ATTEMPTS = 5;
@@ -51,18 +33,7 @@ const redisClient = redis.createClient({
 redisClient.on('error', err => console.error('Redis Client Error:', err));
 redisClient.connect().then(() => console.log('Connected to Redis'));
 
-// Initialize database
-let db;
-async function initDb() {
-  const dbPath = process.env.DB_PATH || './cases.db';
-  console.log('Opening database at:', dbPath);
-  const database = await open({
-    filename: dbPath,
-    driver: sqlite3.Database
-  });
-  await database.run('PRAGMA foreign_keys = ON');
-  return database;
-}
+// Encode the password to handle special characters like @
 
 // Middleware setup
 app.use(express.json());
@@ -82,7 +53,7 @@ app.use(session({
   cookie: { maxAge: 86400000, httpOnly: true, sameSite: 'lax' }
 }));
 
-// Ensure Redis is ready
+// Ensure Redis is ready before routes
 app.use((req, res, next) => {
   if (!redisClient.isOpen) {
     return res.status(503).json({ error: 'Redis not connected' });
@@ -107,6 +78,18 @@ app.use((req, res, next) => {
 });
 
 console.log('Registering routes...');
+
+// Database connection with foreign keys enabled
+const db = new sqlite3.Database(process.env.DB_PATH, (err) => {
+  if (err) console.error('Database error:', err);
+  else {
+    console.log('Connected to SQLite database');
+    db.run('PRAGMA foreign_keys = ON', (err) => {
+      if (err) console.error('Error enabling foreign keys:', err);
+      else console.log('Foreign keys enabled');
+    });
+  }
+});
 
 // File upload setup
 const uploadDir = process.env.UPLOAD_PATH;
@@ -148,9 +131,13 @@ const transporter = nodemailer.createTransport({
 });
 
 // Database schema initialization
-async function setupDatabase(database) {
+async function setupDatabase() {
+  let db;
   try {
-    await database.run(`
+    db = await initDb();
+
+    // Create tables
+    await db.run(`
       CREATE TABLE IF NOT EXISTS cases (
         id TEXT PRIMARY KEY,
         dateOccurrence TEXT,
@@ -162,7 +149,7 @@ async function setupDatabase(database) {
       )
     `);
 
-    await database.run(`
+    await db.run(`
       CREATE TABLE IF NOT EXISTS case_officers (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         caseId TEXT,
@@ -182,7 +169,7 @@ async function setupDatabase(database) {
         ioReportDate TEXT,
         raAssessment TEXT,
         officerAdvisedOfReferral TEXT,
-        section24ReplyToRA TEXT,
+        section24ReplyToRA TEXT
         misconductMeetingDate TEXT,
         misconductOutcome TEXT,
         grossMisconductHearingDate TEXT,
@@ -196,21 +183,17 @@ async function setupDatabase(database) {
       )
     `);
 
-    await database.run(`
+    await db.run(`
       CREATE TABLE IF NOT EXISTS users (
         username TEXT PRIMARY KEY,
         password TEXT,
         role TEXT,
         oneTimePassword TEXT,
-        email TEXT,
-        name TEXT,
-        failed_attempts INTEGER DEFAULT 0,
-        locked BOOLEAN DEFAULT FALSE,
-        lock_time INTEGER
+        email TEXT
       )
     `);
 
-    await database.run(`
+    await db.run(`
       CREATE TABLE IF NOT EXISTS audit_logs (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         user TEXT NOT NULL,
@@ -220,7 +203,7 @@ async function setupDatabase(database) {
       )
     `);
 
-    await database.run(`
+    await db.run(`
       CREATE TABLE IF NOT EXISTS case_files (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         caseId TEXT,
@@ -232,7 +215,7 @@ async function setupDatabase(database) {
       )
     `);
 
-    await database.run(`
+    await db.run(`
       CREATE TABLE IF NOT EXISTS error_logs (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         user TEXT,
@@ -241,7 +224,7 @@ async function setupDatabase(database) {
       )
     `);
 
-    await database.run(`
+    await db.run(`
       CREATE TABLE IF NOT EXISTS officers (
         staffNo TEXT PRIMARY KEY,
         name TEXT NOT NULL,
@@ -253,13 +236,13 @@ async function setupDatabase(database) {
       )
     `);
 
-    await database.run(`
+    await db.run(`
       INSERT INTO case_officers (caseId)
       SELECT id FROM cases 
       WHERE NOT EXISTS (SELECT 1 FROM case_officers WHERE case_officers.caseId = cases.id)
     `).catch(err => console.error('Migration error (minimal):', err));
 
-    await database.run(`
+    await db.run(`
       CREATE TABLE IF NOT EXISTS user_case_permissions (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         username TEXT NOT NULL,
@@ -274,67 +257,35 @@ async function setupDatabase(database) {
       )
     `);
 
-    await database.run(`
-      CREATE TABLE IF NOT EXISTS ip_blocks (
-        ip TEXT PRIMARY KEY,
-        failed_attempts INTEGER DEFAULT 0,
-        blocked BOOLEAN DEFAULT FALSE,
-        block_time INTEGER,
-        reason TEXT,
-        blocked_at DATETIME
-      )
-    `);
-
-    // Check and add only columns that might be missing from older schemas
-    const tableInfo = await database.all("PRAGMA table_info(ip_blocks)");
-    const columnExists = (name) => tableInfo.some(col => col.name === name);
-
-    if (!columnExists('reason')) {
-      await database.run('ALTER TABLE ip_blocks ADD COLUMN reason TEXT')
-        .then(() => console.log('Added reason column'))
-        .catch(err => console.error('Error adding reason:', err));
-    }
-    if (!columnExists('blocked_at')) {
-      await database.run('ALTER TABLE ip_blocks ADD COLUMN blocked_at DATETIME')
-        .then(() => console.log('Added blocked_at column'))
-        .catch(err => console.error('Error adding blocked_at:', err));
-      // Optionally set existing rows to current timestamp
-      await database.run('UPDATE ip_blocks SET blocked_at = CURRENT_TIMESTAMP WHERE blocked_at IS NULL AND blocked = TRUE')
-        .catch(err => console.error('Error updating blocked_at:', err));
-    }
-
-    console.log('ip_blocks table setup complete');
-  
-  
     // Initial data setup
-    const caseCount = await database.get('SELECT COUNT(*) as count FROM cases');
+    const caseCount = await db.get('SELECT COUNT(*) as count FROM cases');
     if (caseCount.count === 0) {
-      await database.run(
+      await db.run(
         'INSERT INTO cases (id, dateOccurrence, type, status, user) VALUES (?, ?, ?, ?, ?)',
         ['PSD/CASE-001', '2025-01-01', 'Misconduct', 'Open', 'admin']
       ).catch(err => console.error('Error inserting initial case:', err));
 
-      await database.run(
+      await db.run(
         'INSERT INTO case_officers (caseId, officer, staffNo) VALUES (?, ?, ?)',
         ['PSD/CASE-001', 'John Doe', '12345']
       ).catch(err => console.error('Error inserting initial case officer:', err));
     }
 
-    const officerCount = await database.get('SELECT COUNT(*) as count FROM officers');
+    const officerCount = await db.get('SELECT COUNT(*) as count FROM officers');
     if (officerCount.count === 0) {
-      await database.run(
+      await db.run(
         'INSERT INTO officers (staffNo, name) VALUES (?, ?)',
         ['12345', 'John Doe']
       ).catch(err => console.error('Error inserting initial officer:', err));
     }
 
-    const userCount = await database.get('SELECT COUNT(*) as count FROM users');
+    const userCount = await db.get('SELECT COUNT(*) as count FROM users');
     if (userCount.count === 0) {
       const adminHash = await bcrypt.hash('password123', 10).catch(err => {
         console.error('Hash error (admin):', err);
         throw err;
       });
-      await database.run(
+      await db.run(
         'INSERT INTO users (username, password, role, email) VALUES (?, ?, ?, ?)',
         ['admin', adminHash, 'admin', 'admin@example.com']
       ).catch(err => console.error('Error inserting admin user:', err));
@@ -343,22 +294,25 @@ async function setupDatabase(database) {
         console.error('Hash error (user1):', err);
         throw err;
       });
-      await database.run(
+      await db.run(
         'INSERT INTO users (username, password, role, email) VALUES (?, ?, ?, ?)',
         ['user1', user1Hash, 'psd admin', 'user1@example.com']
       ).catch(err => console.error('Error inserting user1:', err));
     }
 
     console.log('Database setup complete');
-    const tables = await database.all("SELECT name FROM sqlite_master WHERE type='table';");
-    console.log('Tables in database:', tables.map(t => t.name));
   } catch (err) {
     console.error('Database setup error:', err);
-    throw err;
+  } finally {
+    if (db) await db.close().catch(err => console.error('DB close error:', err));
   }
 }
 
+// Export for use in main server file
+module.exports = { initDb, setupDatabase };
+
 // Authentication middleware
+
 function isAuthenticated(req, res, next) {
   console.log('isAuthenticated - Session ID:', req.sessionID, 'User:', req.session.user, 'Session Data:', req.session);
   if (req.session && req.session.user) {
@@ -408,7 +362,9 @@ app.get('/cases/:id', isAuthenticated, async (req, res) => {
 
   if (!user) return res.status(401).json({ error: 'Not authenticated' });
 
+  let db;
   try {
+    db = await initDb();
     const rows = await db.all(`
       SELECT c.id AS caseId, c.user, co.*, cf.id AS fileId, cf.filePath, cf.originalName, cf.uploadDate, cf.uploadedBy
       FROM cases c
@@ -423,8 +379,8 @@ app.get('/cases/:id', isAuthenticated, async (req, res) => {
     }
 
     const caseData = { id: rows[0].caseId, user: rows[0].user, officers: [], files: [] };
-    const officerMap = new Map();
-    const fileMap = new Map();
+    const officerMap = new Map(); // Deduplicate officers by id
+    const fileMap = new Map();    // Deduplicate files by filePath
 
     for (const row of rows) {
       if (row.officer && !officerMap.has(row.id)) {
@@ -474,11 +430,15 @@ app.get('/cases/:id', isAuthenticated, async (req, res) => {
     caseData.files = [...fileMap.values()];
     console.log('Sending case data:', JSON.stringify(caseData, null, 2));
     
+    // Add audit logging
     await logAction(user, 'View Case', `Viewed case ${id}`);
+    
     res.json(caseData);
   } catch (error) {
     console.error('GET error:', error.stack);
     res.status(500).json({ error: 'Database error', details: error.message });
+  } finally {
+    if (db) await db.close().catch(err => console.error('DB close error:', err.stack));
   }
 });
 
@@ -501,7 +461,7 @@ function restrictToPSDOrHigher(req, res, next) {
   if (req.session.role === 'psd') {
     const caseId = req.params.id ? decodeURIComponent(req.params.id) : null;
     if (!caseId && req.method === 'POST') {
-      return next();
+      return next(); // Allow PSD users to create new cases
     }
     if (caseId) {
       db.get(`
@@ -512,7 +472,7 @@ function restrictToPSDOrHigher(req, res, next) {
         if (!perm) {
           db.get('SELECT user FROM cases WHERE id = ?', [caseId], (err, caseRow) => {
             if (err) return res.status(500).json({ error: 'Database error: Unable to check case ownership' });
-            if (caseRow && caseRow.user === req.session.user) return next();
+            if (caseRow && caseRow.user === req.session.user) return next(); // Original owner
             return res.status(403).json({ error: 'Permission denied: No access to this case' });
           });
         } else if (req.method === 'PUT' && !perm.canEdit) {
@@ -522,7 +482,7 @@ function restrictToPSDOrHigher(req, res, next) {
         }
       });
     } else {
-      return next();
+      return next(); // Allow listing cases; we'll filter in the GET route
     }
   } else {
     return res.status(403).json({ error: 'PSD, PSD Admin, or Admin access required' });
@@ -544,7 +504,9 @@ function getClientIP(req) {
 }
 
 async function logAction(user, action, details) {
+  let db;
   try {
+    db = await initDb();
     const result = await db.run(
       'INSERT INTO audit_logs (user, action, details) VALUES (?, ?, ?)',
       [user || 'unknown', action, details || '']
@@ -552,14 +514,18 @@ async function logAction(user, action, details) {
     console.log(`Audit logged - ID: ${result.lastID}, User: ${user}, Action: ${action}, Details: ${details}`);
   } catch (error) {
     console.error('Audit log error:', error.stack);
-    throw error;
+    throw error; // For debugging
+  } finally {
+    if (db) await db.close();
   }
 }
 
 app.delete('/officers/:caseId/:officerId', isAuthenticated, async (req, res) => {
   const { caseId, officerId } = req.params;
   console.log(`DELETE /officers/${caseId}/${officerId} by user:`, req.session.user);
+  let db;
   try {
+    db = await initDb();
     const result = await db.run('DELETE FROM case_officers WHERE caseId = ? AND id = ?', [caseId, officerId]);
     console.log(`Officer ${officerId} deleted from case ${caseId}, Rows affected:`, result.changes);
     if (result.changes === 0) return res.status(404).json({ error: 'Officer not found' });
@@ -576,28 +542,22 @@ app.delete('/officers/:caseId/:officerId', isAuthenticated, async (req, res) => 
   } catch (err) {
     console.error('Error deleting officer:', err);
     res.status(500).json({ error: 'Database error: Unable to delete officer' });
+  } finally {
+    if (db) await db.close();
   }
 });
 
+
 console.log('Routes registered.');
 
-app.get('/cases', isAuthenticated, async (req, res) => {
-  const user = req.session.user;
-  console.log('GET /cases reached by:', user);
+// List all cases (keep this from your original)
+app.get('/cases', isAuthenticated, (req, res) => {
+  console.log('GET /cases reached by:', req.session.user);
+  db.get('SELECT role FROM users WHERE username = ?', [req.session.user], (err, row) => {
+    if (err) return res.status(500).json({ error: 'Database error: Unable to verify user role' });
+    if (!row) return res.status(403).json({ error: 'User not found' });
 
-  try {
-    // Step 1: Fetch user role
-    console.log('Fetching user role for:', user);
-    const userRow = await db.get('SELECT role FROM users WHERE username = ?', [user]);
-    console.log('User row fetched:', userRow);
-    if (!userRow) {
-      console.log('User not found:', user);
-      return res.status(403).json({ error: 'User not found' });
-    }
-    const userRole = userRow.role;
-    console.log('User role:', userRole);
-
-    // Step 2: Define and execute case query
+    const userRole = row.role;
     let query = 'SELECT id, user FROM cases';
     let params = [];
     if (userRole === 'psd') {
@@ -607,51 +567,49 @@ app.get('/cases', isAuthenticated, async (req, res) => {
         LEFT JOIN user_case_permissions ucp ON c.id = ucp.caseId AND ucp.username = ?
         WHERE c.user = ? OR ucp.canView = 1
       `;
-      params = [user, user];
-    }
-    console.log('Executing case query:', query, 'with params:', params);
-    const caseRows = await db.all(query, params);
-    console.log('Raw case rows:', caseRows);
-
-    // Step 3: Handle empty result
-    if (!caseRows.length) {
-      console.log('No cases found for user:', user);
-      return res.json([]);
+      params = [req.session.user, req.session.user];
     }
 
-    // Step 4: Fetch files and officers for each case
-    const casesWithDetails = await Promise.all(caseRows.map(async (row) => {
-      console.log('Fetching files for case:', row.id);
-      const files = await db.all('SELECT caseId, filePath, originalName, uploadDate, uploadedBy FROM case_files WHERE caseId = ?', [row.id]);
-      console.log('Files fetched for case:', row.id, files);
+    db.all(query, params, (err, caseRows) => {
+      if (err) return res.status(500).json({ error: 'Database error: Unable to fetch cases' });
+      if (!caseRows.length) return res.json([]);
 
-      console.log('Fetching officers for case:', row.id);
-      const officers = await db.all('SELECT * FROM case_officers WHERE caseId = ?', [row.id]);
-      console.log('Officers fetched for case:', row.id, officers);
-
-      return {
+      const casesWithDetails = caseRows.map(row => ({
         id: row.id,
         user: row.user,
-        files: files || [],
-        officers: officers || [],
+        files: [],
+        officers: [],
         ...(userRole === 'psd' ? {
-          canView: row.canView != null ? row.canView : (row.user === user ? 1 : 0),
-          canEdit: row.canEdit != null ? row.canEdit : (row.user === user ? 1 : 0)
+          canView: row.canView != null ? row.canView : (row.user === req.session.user ? 1 : 0),
+          canEdit: row.canEdit != null ? row.canEdit : (row.user === req.session.user ? 1 : 0)
         } : {})
-      };
-    }));
+      }));
 
-    // Step 5: Send response
-    console.log('Sending cases:', casesWithDetails);
-    res.json(casesWithDetails.sort((a, b) => a.id.localeCompare(b.id)));
-  } catch (err) {
-    console.error('Error in /cases:', err.stack);
-    res.status(500).json({ error: 'Database error', details: err.message });
-  }
+      let completed = 0;
+      const total = caseRows.length;
+
+      caseRows.forEach((caseItem, index) => {
+        db.all('SELECT caseId, filePath, originalName, uploadDate, uploadedBy FROM case_files WHERE caseId = ?', [caseItem.id], (err, files) => {
+          if (err) console.error('Error fetching files for', caseItem.id, ':', err);
+          else casesWithDetails[index].files = files || [];
+          db.all('SELECT * FROM case_officers WHERE caseId = ?', [caseItem.id], (err, officers) => {
+            if (err) console.error('Error fetching officers for', caseItem.id, ':', err);
+            else casesWithDetails[index].officers = officers || [];
+            completed++;
+            if (completed === total) {
+              console.log('Sending cases:', casesWithDetails);
+              res.json(casesWithDetails.sort((a, b) => a.id.localeCompare(b.id)));
+            }
+          });
+        });
+      });
+    });
+  });
 });
 
 console.log('Routes registered.');
 
+// Remaining routes
 app.post('/audit/view-case', isAuthenticated, async (req, res) => {
   const { caseId, officerId, allOfficers } = req.body;
   const details = `Viewed case ${caseId}${officerId ? `, Officer ID: ${officerId}` : ''}${allOfficers ? ' (all officers)' : ''}`;
@@ -724,13 +682,17 @@ app.post('/login', async (req, res) => {
   const ip = getClientIP(req);
   console.log('Login attempt:', { username, password: '[hidden]', ip });
 
+  let db;
   try {
-    const ipRow = await db.get('SELECT * FROM ip_blocks WHERE ip = ?', [ip]);
+    db = await initDb();
+    console.log('Database opened');
+
+    let ipRow = await db.get('SELECT * FROM ip_blocks WHERE ip = ?', [ip]);
     console.log('IP block check:', ipRow || 'No block found');
 
     const now = Date.now();
     if (ipRow && ipRow.blocked) {
-      const timeLeft = (ipRow.block_time || 0) + IP_BLOCK_DURATION - now;
+      const timeLeft = ipRow.block_time + IP_BLOCK_DURATION - now;
       if (timeLeft > 0) {
         console.log('IP blocked, time left:', timeLeft);
         return res.status(403).json({ error: 'ip_blocked', blockRemaining: timeLeft });
@@ -745,13 +707,13 @@ app.post('/login', async (req, res) => {
       await db.run('INSERT OR REPLACE INTO ip_blocks (ip, failed_attempts, blocked, block_time) VALUES (?, COALESCE((SELECT failed_attempts FROM ip_blocks WHERE ip = ?) + 1, 1), ?, ?)',
         [ip, ip, false, null]);
       console.log('IP attempts incremented');
-      await checkIPBlock(ip, res);
+      checkIPBlock(ip, res);
       console.log('User not found, returning 401');
       return res.status(401).json({ error: 'Invalid credentials' });
     }
 
     if (user.locked) {
-      const timeLeft = (user.lock_time || 0) + USER_LOCK_DURATION - now;
+      const timeLeft = user.lock_time + USER_LOCK_DURATION - now;
       if (timeLeft > 0) {
         console.log('User locked, time left:', timeLeft);
         return res.status(403).json({ error: 'user_locked', lockRemaining: timeLeft });
@@ -759,33 +721,53 @@ app.post('/login', async (req, res) => {
       await db.run('UPDATE users SET locked = FALSE, failed_attempts = 0, lock_time = NULL WHERE username = ?', [username]);
       console.log('User lock cleared');
       user.locked = false;
+      user.failed_attempts = 0;
+      user.lock_time = null;
     }
 
     const match = await bcrypt.compare(password, user.password);
-    console.log('Password match:', match);
+    console.log('Password match:', match, 'Stored hash:', user.password);
 
     if (!match) {
       console.log('Password mismatch, incrementing attempts');
-      await incrementAttempts(username, ip, res);
+      incrementAttempts(username, ip, res);
       return;
     }
 
-    await resetAttempts(username, ip);
+    // Handle oneTimePassword as string or number
+    if (user.oneTimePassword == '1' || user.oneTimePassword === 1) { // Loose equality or explicit string check
+      console.log('Login success with temp password');
+      await new Promise((resolve, reject) => resetAttempts(username, ip, err => err ? reject(err) : resolve()));
+      req.session.user = username;
+      req.session.role = user.role || 'default';
+      req.session.name = user.name || 'Unknown';
+      req.session.needsPasswordReset = true;
+      await req.session.save();
+      console.log('Login Success (Temp Password):', username, 'Session ID:', req.sessionID);
+      logAction(username, 'Login', 'Logged in with temporary password');
+      const response = { loggedIn: true, needsReset: true, role: user.role, name: user.name };
+      console.log('Sending response:', response);
+      return res.json(response);
+    }
+
+    console.log('Login success with regular password');
+    await new Promise((resolve, reject) => resetAttempts(username, ip, err => err ? reject(err) : resolve()));
     req.session.user = username;
     req.session.role = user.role || 'default';
     req.session.name = user.name || 'Unknown';
-    req.session.needsPasswordReset = user.oneTimePassword == '1' || user.oneTimePassword === 1;
-    console.log('Login Success:', username, 'Session ID:', req.sessionID);
-    await logAction(username, 'Login', user.oneTimePassword ? 'Logged in with temporary password' : 'User agreed to disclaimer and logged in');
-    res.json({ 
-      loggedIn: true, 
-      needsReset: req.session.needsPasswordReset, 
-      role: user.role, 
-      name: user.name 
-    });
+    req.session.needsPasswordReset = false;
+    await req.session.save();
+    console.log('Login Success (Password):', username, 'Session ID:', req.sessionID);
+    logAction(username, 'Login', 'User agreed to disclaimer and logged in');
+    const response = { loggedIn: true, needsReset: false, role: user.role, name: user.name };
+    console.log('Sending response:', response);
+    res.json(response);
   } catch (err) {
     console.error('Login error:', err);
     res.status(500).json({ error: 'Server error' });
+  } finally {
+    if (db) await db.close();
+    console.log('Database closed');
   }
 });
 
@@ -795,52 +777,63 @@ app.post('/change-password', async (req, res) => {
     return res.status(403).json({ error: 'Unauthorized' });
   }
 
+  let db;
   try {
+    db = await initDb();
     const hashedPassword = await bcrypt.hash(newPassword, 10);
     await db.run('UPDATE users SET password = ?, oneTimePassword = 0 WHERE username = ?', [hashedPassword, username]);
     console.log('Password changed for:', username);
-    await logAction(username, 'Password Change', 'User changed password after temporary login');
+    logAction(username, 'Password Change', 'User changed password after temporary login');
     req.session.needsPasswordReset = false;
+    await req.session.save();
     res.json({ message: 'Password changed successfully' });
   } catch (err) {
     console.error('Change password error:', err);
     res.status(500).json({ error: 'Server error' });
+  } finally {
+    if (db) await db.close();
   }
 });
 
-// Helper functions for login
-async function incrementAttempts(username, ip, res) {
-  try {
-    await db.run('UPDATE users SET failed_attempts = failed_attempts + 1 WHERE username = ?', [username]);
-    await db.run('INSERT OR REPLACE INTO ip_blocks (ip, failed_attempts, blocked, block_time) VALUES (?, COALESCE((SELECT failed_attempts FROM ip_blocks WHERE ip = ?) + 1, 1), ?, ?)',
-      [ip, ip, false, null]);
-    await checkIPBlock(ip, res);
+// Helper to increment attempts and check thresholds
+function incrementAttempts(username, ip, res) {
+  db.run('UPDATE users SET failed_attempts = failed_attempts + 1 WHERE username = ?', [username], (err) => {
+    if (err) console.error('Increment user attempts error:', err);
+    db.run('INSERT OR REPLACE INTO ip_blocks (ip, failed_attempts, blocked, block_time) VALUES (?, COALESCE((SELECT failed_attempts FROM ip_blocks WHERE ip = ?) + 1, 1), ?, ?)',
+      [ip, ip, false, null], (err) => {
+        if (err) console.error('Increment IP attempts error:', err);
+        checkIPBlock(ip, res);
+      });
     res.status(401).json({ error: 'Invalid credentials' });
-  } catch (err) {
-    console.error('Increment attempts error:', err);
-  }
+  });
 }
 
-async function resetAttempts(username, ip) {
-  try {
-    await db.run('UPDATE users SET failed_attempts = 0, locked = FALSE, lock_time = NULL WHERE username = ?', [username]);
-    await db.run('UPDATE ip_blocks SET failed_attempts = CASE WHEN failed_attempts > 0 THEN failed_attempts - 1 ELSE 0 END, blocked = FALSE, block_time = NULL WHERE ip = ?', [ip]);
-  } catch (err) {
-    console.error('Reset attempts error:', err);
-    throw err;
-  }
+// Helper to reset attempts on success
+function resetAttempts(username, ip, callback) {
+  db.run('UPDATE users SET failed_attempts = 0, locked = FALSE, lock_time = NULL WHERE username = ?', [username], (err) => {
+    if (err) {
+      console.error('Reset user attempts error:', err);
+      return callback(err);
+    }
+    db.run('UPDATE ip_blocks SET failed_attempts = CASE WHEN failed_attempts > 0 THEN failed_attempts - 1 ELSE 0 END, blocked = FALSE, block_time = NULL WHERE ip = ?', [ip], (err) => {
+      if (err) {
+        console.error('Reset IP attempts error:', err);
+        return callback(err);
+      }
+      callback(null);
+    });
+  });
 }
 
-async function checkIPBlock(ip, res) {
-  try {
-    const row = await db.get('SELECT failed_attempts FROM ip_blocks WHERE ip = ?', [ip]);
+// Helper to check IP block threshold
+function checkIPBlock(ip, res) {
+  db.get('SELECT failed_attempts FROM ip_blocks WHERE ip = ?', [ip], (err, row) => {
+    if (err) console.error('Check IP block error:', err);
     if (row && row.failed_attempts >= MAX_IP_ATTEMPTS) {
-      await db.run('UPDATE ip_blocks SET blocked = TRUE, block_time = ? WHERE ip = ?', [Date.now(), ip]);
+      db.run('UPDATE ip_blocks SET blocked = TRUE, block_time = ? WHERE ip = ?', [Date.now(), ip]);
       res.status(403).json({ error: 'ip_blocked', blockRemaining: IP_BLOCK_DURATION });
     }
-  } catch (err) {
-    console.error('Check IP block error:', err);
-  }
+  });
 }
 
 app.get('/session-check', (req, res) => {
@@ -922,27 +915,33 @@ app.post('/cases', restrictToPSDOrHigher, upload.array('files'), async (req, res
     return res.status(400).json({ error: 'Case ID, Staff No., and Officer are required' });
   }
 
-  let transactionActive = false;
+  let db;
   try {
+    db = await initDb();
+
+    // Check for duplicate case ID
     const existingCase = await db.get('SELECT id FROM cases WHERE id = ?', [id]);
     if (existingCase) {
       return res.status(400).json({ error: `Case ID ${id} already exists` });
     }
 
+    // Begin transaction
     await db.run('BEGIN TRANSACTION');
-    transactionActive = true;
 
+    // Check/create officer
     const officerRow = await db.get('SELECT * FROM officers WHERE staffNo = ?', [staffNo]);
     if (!officerRow) {
       await db.run('INSERT INTO officers (staffNo, name) VALUES (?, ?)', [staffNo, officer]);
     }
 
+    // Insert case (minimal fields)
     await db.run(`
       INSERT INTO cases (
         id, user
       ) VALUES (?, ?)
     `, [id, user]);
 
+    // Insert case_officers (all 27 fields)
     await db.run(`
       INSERT INTO case_officers (
         caseId, officer, staffNo, summary, breachOfStandards, investigator, severity, section17Date, policeFriend,
@@ -959,6 +958,7 @@ app.post('/cases', restrictToPSDOrHigher, upload.array('files'), async (req, res
       status || '', officerAdvisedOfReferral || '', section24ReplyToRA || ''
     ]);
 
+    // Handle file uploads
     if (req.files && req.files.length > 0) {
       const fileInserts = req.files.map(file => [id, file.url, file.originalname, user]);
       await db.run(
@@ -968,14 +968,16 @@ app.post('/cases', restrictToPSDOrHigher, upload.array('files'), async (req, res
       );
     }
 
+    // Commit transaction
     await db.run('COMMIT');
-    transactionActive = false;
     await logAction(user, 'Create Case', `Created case ${id} with officer ${staffNo}`);
     res.status(201).json({ message: 'Case added successfully', id });
   } catch (error) {
     console.error('Create case error:', error.stack);
-    if (transactionActive) await db.run('ROLLBACK').catch(err => console.error('Rollback error:', err));
+    if (db) await db.run('ROLLBACK').catch(err => console.error('Rollback error:', err));
     res.status(500).json({ error: 'Database error', details: error.message });
+  } finally {
+    if (db) await db.close();
   }
 });
 
@@ -997,7 +999,10 @@ app.post('/cases/:id/officers', restrictToPSDOrHigher, async (req, res) => {
   if (!officer) return res.status(400).json({ error: 'Officer name is required' });
   if (!staffNo) return res.status(400).json({ error: 'Staff No. is required' });
 
+  let db;
   try {
+    db = await initDb();
+
     const caseRow = await db.get('SELECT user FROM cases WHERE id = ?', [id]);
     if (!caseRow) return res.status(404).json({ error: 'Case not found' });
 
@@ -1007,12 +1012,14 @@ app.post('/cases/:id/officers', restrictToPSDOrHigher, async (req, res) => {
       return res.status(403).json({ error: 'Permission denied: PSD users can only modify their own cases' });
     }
 
+    // Check if officer exists in officers table, create if not
     const officerRow = await db.get('SELECT * FROM officers WHERE staffNo = ?', [staffNo]);
     if (!officerRow) {
       await db.run('INSERT INTO officers (staffNo, name) VALUES (?, ?)', [staffNo, officer]);
       console.log(`Created officer profile for ${staffNo}: ${officer}`);
     }
 
+    // Insert into case_officers
     await db.run(`
       INSERT INTO case_officers (
         caseId, officer, staffNo, summary, breachOfStandards, investigator, severity, section17Date, policeFriend,
@@ -1034,8 +1041,11 @@ app.post('/cases/:id/officers', restrictToPSDOrHigher, async (req, res) => {
   } catch (error) {
     console.error('Add officer error:', error.stack);
     res.status(500).json({ error: 'Database error', details: error.message });
+  } finally {
+    if (db) await db.close();
   }
 });
+
 
 app.get('/session-status', (req, res) => {
   if (req.session.user) {
@@ -1045,13 +1055,34 @@ app.get('/session-status', (req, res) => {
         loggedIn: true,
         role: row ? row.role : 'unknown',
         username: req.session.user,
-        name: req.session.name
+        name: req.session.name // Add name
       });
     });
   } else {
     res.json({ loggedIn: false });
   }
 });
+
+async function initDb() {
+  const dbPath = process.env.DB_PATH || './cases.db';
+  console.log('Opening database at:', dbPath);
+  const db = await open({
+    filename: dbPath,
+    driver: sqlite3.Database
+  });
+  await db.run('PRAGMA foreign_keys = ON');
+  // Ensure audit_logs exists
+  await db.run(`
+    CREATE TABLE IF NOT EXISTS audit_logs (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      user TEXT NOT NULL,
+      action TEXT NOT NULL,
+      details TEXT,
+      timestamp TEXT DEFAULT CURRENT_TIMESTAMP
+    )
+  `);
+  return db;
+}
 
 app.put('/cases/:id', restrictToPSDOrHigher, upload.array('files'), async (req, res) => {
   const id = decodeURIComponent(req.params.id);
@@ -1065,12 +1096,15 @@ app.put('/cases/:id', restrictToPSDOrHigher, upload.array('files'), async (req, 
     return res.status(400).json({ error: 'Officer ID required' });
   }
 
+  let db;
   let transactionActive = false;
   try {
+    db = await initDb();
+
     const [caseRow, userRow, permissionRow] = await Promise.all([
       db.get('SELECT user FROM cases WHERE id = ?', [id]),
       db.get('SELECT role FROM users WHERE username = ?', [user]),
-      db.get('SELECT canEdit FROM user_case_permissions WHERE caseId = ? AND username = ?', [id, user])
+      db.get('SELECT canEdit FROM user_case_permissions WHERE caseId = ? AND username = ?', [id, user]) // Fixed table name
     ]);
 
     if (!caseRow) {
@@ -1164,14 +1198,20 @@ app.put('/cases/:id', restrictToPSDOrHigher, upload.array('files'), async (req, 
     });
   } catch (error) {
     console.error('PUT error:', error.stack);
-    if (transactionActive) await db.run('ROLLBACK').catch(err => console.error('Rollback failed:', err.stack));
+    if (transactionActive) {
+      await db.run('ROLLBACK').catch(err => console.error('Rollback failed:', err.stack));
+    }
     res.status(500).json({ error: 'Internal server error', details: error.message });
+  } finally {
+    if (db) await db.close().catch(err => console.error('DB close error:', err.stack));
   }
 });
 
+// Helper to log changes
 function logChanges(oldData, newData) {
   const changes = [];
   for (const key in newData) {
+    // Skip if not a meaningful change
     if (key === 'officerId' || key === 'id') continue;
     const oldVal = oldData[key] === null || oldData[key] === undefined ? '' : oldData[key];
     const newVal = newData[key] === null || newData[key] === undefined ? '' : newData[key];
@@ -1197,6 +1237,7 @@ app.get('/detailed-stats', restrictToStatsViewers, (req, res) => {
     if (err) return res.status(500).json({ error: 'Database error: Unable to verify user role' });
     if (!row) return res.status(403).json({ error: 'User not found' });
 
+    // Base query for breaches (unchanged)
     let baseQuery = `
       SELECT SUBSTR(dateOccurrence, 1, 4) as year, breachOfStandards 
       FROM case_officers 
@@ -1236,6 +1277,7 @@ app.get('/detailed-stats', restrictToStatsViewers, (req, res) => {
       const userFilter = row.role === 'psd' ? ' AND caseId IN (SELECT id FROM cases WHERE user = ?)' : '';
       const userParams = row.role === 'psd' ? [req.session.user] : [];
 
+      // Updated queries object
       const queries = {
         casesPerYear: `
           SELECT SUBSTR(dateOccurrence, 1, 4) as year, COUNT(*) as count 
@@ -1283,6 +1325,7 @@ app.get('/detailed-stats', restrictToStatsViewers, (req, res) => {
           WHERE status IS NOT NULL AND status != 'N/A' AND status != '' 
           AND dateOccurrence IS NOT NULL AND dateOccurrence != 'N/A' AND dateOccurrence != '' 
           GROUP BY year, status`,
+        // Officer Age at Incident (total count, no year)
         officerAgeAtIncident: `
           SELECT 
             ROUND((julianday(co.dateOccurrence) - julianday(o.dateOfBirth)) / 365.25) as age, 
@@ -1293,6 +1336,7 @@ app.get('/detailed-stats', restrictToStatsViewers, (req, res) => {
           AND o.dateOfBirth IS NOT NULL AND o.dateOfBirth != 'N/A' AND o.dateOfBirth != '' 
           GROUP BY age 
           ORDER BY age`,
+        // Years of Service at Incident (total count, no year)
         serviceLengthAtIncident: `
           SELECT 
             ROUND((julianday(co.dateOccurrence) - julianday(o.joiningDate)) / 365.25) as years, 
@@ -1379,7 +1423,7 @@ app.get('/detailed-stats', restrictToStatsViewers, (req, res) => {
             caseStatus,
             breachesOfStandards,
             officerAgeAtIncident,
-            serviceLengthAtIncident
+            serviceLengthAtIncident // Renamed to match frontend
           };
           console.log('Stats data sent:', stats);
           res.json(stats);
@@ -1488,7 +1532,7 @@ app.get('/cases-by-officer', isAuthenticated, (req, res) => {
             comments: row.comments
           });
         });
-        console.log('Cases by officer retrieved:', casesWithDetails);
+        console.log('Cases by officer retrieved:', casesWithDetails); // Debug log
         res.json(casesWithDetails);
       });
     });
@@ -1497,19 +1541,27 @@ app.get('/cases-by-officer', isAuthenticated, (req, res) => {
 
 app.post('/admin/users', isPSDAdmin, async (req, res) => {
   const { username, role, email, name } = req.body;
-  const oneTimePassword = Math.random().toString(36).slice(-8);
+  const oneTimePassword = Math.random().toString(36).slice(-8); // e.g., 'abc123xy'
+  let db;
 
   try {
+    db = await initDb();
+
+    // Check current user's role
     const userRow = await db.get('SELECT role FROM users WHERE username = ?', [req.session.user]);
     if (!userRow) return res.status(500).json({ error: 'Database error: Unable to verify user role' });
     if (userRow.role === 'psd admin' && (role === 'psd admin' || role === 'admin')) {
       return res.status(403).json({ error: 'PSD Admin cannot create PSD Admin or Admin users' });
     }
 
+    // Check if username exists
     const existingUser = await db.get('SELECT username FROM users WHERE username = ?', [username]);
     if (existingUser) return res.status(400).json({ error: 'User already exists' });
 
+    // Hash the temporary password
     const hashedPassword = await bcrypt.hash(oneTimePassword, 10);
+
+    // Insert user with hashed password and oneTimePassword as '1'
     await db.run(
       'INSERT INTO users (username, role, password, oneTimePassword, email, name) VALUES (?, ?, ?, ?, ?, ?)',
       [username, role, hashedPassword, '1', email, name || null]
@@ -1520,6 +1572,8 @@ app.post('/admin/users', isPSDAdmin, async (req, res) => {
   } catch (error) {
     console.error('User creation error:', error.stack);
     res.status(500).json({ error: 'Database error: Unable to create user' });
+  } finally {
+    if (db) await db.close();
   }
 });
 
@@ -1531,19 +1585,23 @@ app.get('/admin/users', isPSDAdmin, (req, res) => {
 });
 
 app.get('/admin/permissions', restrictToAdminOrPSDAdmin, async (req, res) => {
+  let db;
   try {
+    db = await initDb();
     const permissions = await db.all('SELECT * FROM user_case_permissions');
     console.log('Sending permissions:', permissions);
     res.json(permissions);
   } catch (err) {
     console.error('Get permissions error:', err);
     res.status(500).json({ error: 'Failed to fetch permissions' });
+  } finally {
+    if (db) await db.close();
   }
 });
 
 app.put('/admin/users/:username', isPSDAdmin, (req, res) => {
   const { username } = req.params;
-  const { newUsername, role, email, name } = req.body;
+  const { newUsername, role, email, name } = req.body; // Added name
 
   if (!newUsername || !role || !email) {
     return res.status(400).json({ error: 'Username, role, and email are required' });
@@ -1578,314 +1636,400 @@ app.put('/admin/users/:username', isPSDAdmin, (req, res) => {
             if (err) console.error('Failed to update case ownership:', err);
           });
 
-          logAction(req.session.user, 'Update User', `Updated user ${username} to ${newUsername}, role: ${role}, email: ${email}, name: ${name || 'not set'}`);
-          res.json({ message: 'User updated successfully', username: newUsername });
+          logAction(req.session.user, 'Update User', `Updated user ${username} to ${newUsername}, role: ${role}, email: ${email}, name: ${name || 'unchanged'}`);
+          res.json({ message: 'User updated successfully', username: newUsername, role, email, name }); // Added name to response
         });
       });
     });
   });
 });
 
-app.delete('/admin/users/:username', isPSDAdmin, async (req, res) => {
+app.post('/admin/permissions', restrictToAdminOrPSDAdmin, (req, res) => {
+  console.log('POST /admin/permissions hit');
+  const { username, caseId, canView, canEdit } = req.body;
+  const assignedBy = req.session.user;
+  console.log('Update permissions request:', { username, caseId, canView, canEdit, assignedBy });
+
+  if (!username || !caseId) {
+    console.log('Missing required fields');
+    return res.status(400).json({ error: 'Username and caseId are required' });
+  }
+
+  db.get('SELECT role FROM users WHERE username = ?', [username], (err, row) => {
+    if (err) {
+      console.error('User check error:', err);
+      return res.status(500).json({ error: 'Database error: Unable to verify user' });
+    }
+    if (!row || row.role !== 'psd') {
+      console.log('Invalid user role:', row ? row.role : 'User not found');
+      return res.status(400).json({ error: 'User must be a PSD role user' });
+    }
+
+    db.get('SELECT id FROM cases WHERE id = ?', [caseId], (err, caseRow) => {
+      if (err) {
+        console.error('Case check error:', err);
+        return res.status(500).json({ error: 'Database error: Unable to verify case' });
+      }
+      if (!caseRow) {
+        console.log('Case not found:', caseId);
+        return res.status(404).json({ error: 'Case not found' });
+      }
+
+      db.run(`
+        INSERT INTO user_case_permissions (username, caseId, canView, canEdit, assignedBy)
+        VALUES (?, ?, ?, ?, ?)
+        ON CONFLICT(username, caseId) DO UPDATE SET
+          canView = excluded.canView,
+          canEdit = excluded.canEdit,
+          assignedBy = excluded.assignedBy,
+          assignedDate = CURRENT_TIMESTAMP
+      `, [username, caseId, canView ? 1 : 0, canEdit ? 1 : 0, assignedBy], (err) => {
+        if (err) {
+          console.error('Permission update error:', err);
+          return res.status(500).json({ error: 'Database error: Unable to assign/update permission' });
+        }
+        console.log('Permission updated successfully:', { username, caseId });
+        logAction(assignedBy, 'Assign Permission', `Assigned/Updated permission for ${username} on case ${caseId}: view=${canView}, edit=${canEdit}`);
+        res.status(201).json({ message: 'Permission assigned/updated successfully' });
+      });
+    });
+  });
+});
+
+app.post('/admin/reset-password/:username', isPSDAdmin, async (req, res) => {
+  const { username } = req.params;
+  let db;
+  try {
+    db = await initDb();
+
+    // Fetch user details
+    const user = await db.get('SELECT email, username FROM users WHERE username = ?', [username]);
+    if (!user || !user.email) {
+      return res.status(404).json({ error: 'User not found or no email registered' });
+    }
+
+    // Generate temporary password
+    const tempPassword = Math.random().toString(36).slice(-8); // e.g., "6w1tvwcx"
+    const hashedTempPassword = await bcrypt.hash(tempPassword, 10);
+
+    // Update user in database
+    await db.run(
+      'UPDATE users SET password = ?, oneTimePassword = 1 WHERE username = ?', 
+      [hashedTempPassword, username]
+    );
+
+    // Send email to user
+    const mailOptions = {
+      from: 'your-email@gmail.com',
+      to: user.email,
+      subject: 'Your Temporary Password',
+      text: `Your temporary password is: ${tempPassword}\n\nPlease log in and change your password immediately.`
+    };
+
+    await transporter.sendMail(mailOptions);
+    console.log(`Temporary password email sent to ${user.email}`);
+
+    // Log action without exposing the password
+    await logAction(req.session.user, 'Admin Password Reset', `Reset password for ${username} - email sent`);
+
+    // Respond to admin without the password
+    res.json({ message: 'Password reset email sent to the user' });
+  } catch (error) {
+    console.error('Reset password error:', error);
+    res.status(500).json({ error: 'Failed to reset password' });
+  } finally {
+    if (db) await db.close();
+  }
+});
+
+app.delete('/admin/users/:username', isPSDAdmin, (req, res) => {
   const { username } = req.params;
 
-  try {
-    const requesterRow = await db.get('SELECT role FROM users WHERE username = ?', [req.session.user]);
-    if (!requesterRow) return res.status(500).json({ error: 'Database error: Unable to fetch requester role' });
+  db.get('SELECT role FROM users WHERE username = ?', [req.session.user], (err, requesterRow) => {
+    if (err) return res.status(500).json({ error: 'Database error: Unable to fetch requester role' });
 
-    const targetRow = await db.get('SELECT role FROM users WHERE username = ?', [username]);
-    if (!targetRow) return res.status(404).json({ error: 'User not found' });
+    db.get('SELECT role FROM users WHERE username = ?', [username], (err, targetRow) => {
+      if (err) return res.status(500).json({ error: 'Database error: Unable to fetch user' });
+      if (!targetRow) return res.status(404).json({ error: 'User not found' });
 
-    if (requesterRow.role === 'psd admin' && (targetRow.role === 'psd admin' || targetRow.role === 'admin')) {
-      return res.status(403).json({ error: 'PSD Admin cannot delete PSD Admin or Admin users' });
-    }
+      if (requesterRow.role === 'psd admin' && (targetRow.role === 'psd admin' || targetRow.role === 'admin')) {
+        return res.status(403).json({ error: 'PSD Admin cannot delete PSD Admin or Admin users' });
+      }
 
-    const result = await db.run('DELETE FROM users WHERE username = ?', [username]);
-    if (result.changes === 0) return res.status(404).json({ error: 'User not found' });
-
-    await logAction(req.session.user, 'Delete User', `Deleted user ${username}`);
-    res.json({ message: 'User deleted successfully' });
-  } catch (error) {
-    console.error('Delete user error:', error.stack);
-    res.status(500).json({ error: 'Database error: Unable to delete user' });
-  }
+      console.log(`Attempting to delete user: ${username} by ${req.session.user}`);
+      db.run('DELETE FROM users WHERE username = ?', [username], (err) => {
+        if (err) {
+          console.error('Database error (DELETE users):', err);
+          return res.status(500).json({ error: 'Database error: Unable to delete user' });
+        }
+        if (this.changes === 0) {
+          console.log(`User ${username} not found`);
+          return res.status(404).json({ error: 'User not found' });
+        }
+        logAction(req.session.user, 'Delete User', `Deleted user ${username}`);
+        console.log(`User ${username} deleted successfully`);
+        res.json({ message: 'User deleted successfully', username });
+      });
+    });
+  });
 });
 
-app.get('/officers', isAuthenticated, async (req, res) => {
-  console.log('GET /officers route hit');
-  try {
-    const role = req.query.role; // Optional role filter
-    let query = 'SELECT * FROM officers';
-    let params = [];
-    if (role) {
-      query += ' WHERE role = ?';
-      params.push(role);
-    }
-    const officers = await db.all(query, params);
-    console.log('Fetched officers:', officers);
-    await logAction(req.session.user, 'List Officers', `Viewed all officers${role ? ` for role: ${role}` : ''}`);
-    res.json(officers);
-  } catch (error) {
-    console.error('Get officers error:', error.stack);
-    res.status(500).json({ error: 'Database error', details: error.message });
-  }
+app.delete('/admin/permissions/:id', restrictToAdminOrPSDAdmin, (req, res) => {
+  const { id } = req.params;
+  const user = req.session.user;
+
+  db.get('SELECT username, caseId FROM user_case_permissions WHERE id = ?', [id], (err, row) => {
+    if (err) return res.status(500).json({ error: 'Database error: Unable to fetch permission' });
+    if (!row) return res.status(404).json({ error: 'Permission not found' });
+
+    db.run('DELETE FROM user_case_permissions WHERE id = ?', [id], function(err) {
+      if (err) return res.status(500).json({ error: 'Database error: Unable to remove permission' });
+      if (this.changes === 0) return res.status(404).json({ error: 'Permission not found' });
+      logAction(user, 'Remove Permission', `Removed permission for ${row.username} on case ${row.caseId}`);
+      res.json({ message: 'Permission removed successfully' });
+    });
+  });
 });
 
-app.get('/officers/:staffNo', isAuthenticated, async (req, res) => {
-  const { staffNo } = req.params;
-  try {
-    const officer = await db.get('SELECT * FROM officers WHERE staffNo = ?', [staffNo]);
-    if (!officer) return res.status(404).json({ error: 'Officer not found' });
-
-    // Fetch PSD history from case_officers (as in old script)
-    const psdHistory = await db.all('SELECT caseId, id as officerId FROM case_officers WHERE staffNo = ?', [staffNo]);
-    officer.psdHistory = psdHistory; // Use psdHistory to match old behavior
-
-    console.log('Officer details retrieved:', officer);
-    await logAction(req.session.user, 'View Officer', `Viewed officer ${staffNo}`);
-    res.json(officer);
-  } catch (error) {
-    console.error('Get officer error:', error.stack);
-    res.status(500).json({ error: 'Database error', details: error.message });
-  }
-});
-
-app.put('/officers/:staffNo', restrictToAdminOrPSDAdmin, async (req, res) => {
-  const { staffNo } = req.params;
-  const { name, photoPath, joiningDate, rank, dateOfBirth } = req.body;
-
-  try {
-    const officerRow = await db.get('SELECT * FROM officers WHERE staffNo = ?', [staffNo]);
-    if (!officerRow) return res.status(404).json({ error: 'Officer not found' });
-
-    const result = await db.run(`
-      UPDATE officers SET name = ?, photoPath = ?, joiningDate = ?, rank = ?, dateOfBirth = ? WHERE staffNo = ?
-    `, [name || officerRow.name, photoPath || officerRow.photoPath, joiningDate || officerRow.joiningDate, rank || officerRow.rank, dateOfBirth || officerRow.dateOfBirth, staffNo]);
-
-    if (result.changes === 0) return res.status(404).json({ error: 'Officer not found' });
-
-    await logAction(req.session.user, 'Update Officer', `Updated officer ${staffNo}: name=${name}, photoPath=${photoPath}, joiningDate=${joiningDate}, rank=${rank}, dateOfBirth=${dateOfBirth}`);
-    res.json({ message: 'Officer updated successfully' });
-  } catch (error) {
-    console.error('Update officer error:', error.stack);
-    res.status(500).json({ error: 'Database error', details: error.message });
-  }
-});
-
-app.get('/audit-logs', restrictToStatsViewers, (req, res) => {
-  db.all('SELECT * FROM audit_logs ORDER BY timestamp DESC LIMIT 1000', (err, rows) => {
+app.get('/audit', isPSDAdmin, (req, res) => {
+  db.all('SELECT * FROM audit_logs ORDER BY timestamp DESC LIMIT 100', (err, rows) => {
     if (err) return res.status(500).json({ error: 'Database error: Unable to fetch audit logs' });
     res.json(rows);
   });
 });
 
-app.post('/admin/permissions', restrictToAdminOrPSDAdmin, async (req, res) => {
-  const { username, caseId, canView, canEdit, assignedBy } = req.body;
+app.get('/officers', isAuthenticated, (req, res) => {
+  db.all('SELECT * FROM officers', (err, officers) => {
+    if (err) return res.status(500).json({ error: 'Database error: Unable to fetch officers' });
 
-  if (!username || !caseId || canView === undefined || canEdit === undefined || !assignedBy) {
-    return res.status(400).json({ error: 'Missing required fields' });
-  }
+    const promises = officers.map(officer => {
+      return new Promise((resolve, reject) => {
+        db.all('SELECT caseId, id as officerId FROM case_officers WHERE staffNo = ?', [officer.staffNo], (err, cases) => {
+          if (err) reject(err);
+          resolve({ ...officer, psdHistory: cases });
+        });
+      });
+    });
 
+    Promise.all(promises)
+      .then(officersWithHistory => res.json(officersWithHistory))
+      .catch(err => res.status(500).json({ error: 'Database error: Unable to fetch PSD history' }));
+  });
+});
+
+app.get('/officers/:staffNo', restrictToAdminOrPSDAdmin, async (req, res) => {
+  const { staffNo } = req.params;
+  const user = req.session.user;
+  let db;
   try {
-    const userExists = await db.get('SELECT username FROM users WHERE username = ?', [username]);
-    if (!userExists) return res.status(404).json({ error: 'User not found' });
+    db = await initDb();
+    const officer = await db.get('SELECT * FROM officers WHERE staffNo = ?', [staffNo]);
+    if (!officer) return res.status(404).json({ error: 'Officer not found' });
 
-    const caseExists = await db.get('SELECT id FROM cases WHERE id = ?', [caseId]);
-    if (!caseExists) return res.status(404).json({ error: 'Case not found' });
-
-    const requesterRole = await db.get('SELECT role FROM users WHERE username = ?', [req.session.user]);
-    if (requesterRole.role === 'psd admin' && username === req.session.user) {
-      return res.status(403).json({ error: 'PSD Admin cannot assign permissions to themselves' });
-    }
-
-    await db.run(`
-      INSERT OR REPLACE INTO user_case_permissions (username, caseId, canView, canEdit, assignedBy)
-      VALUES (?, ?, ?, ?, ?)
-    `, [username, caseId, canView ? 1 : 0, canEdit ? 1 : 0, assignedBy]);
-
-    await logAction(req.session.user, 'Assign Permission', `Assigned permissions to ${username} for case ${caseId}: canView=${canView}, canEdit=${canEdit}`);
-    res.status(201).json({ message: 'Permission assigned successfully' });
-  } catch (err) {
-    console.error('Assign permission error:', err);
-    res.status(500).json({ error: 'Failed to assign permission' });
+    const cases = await db.all('SELECT caseId, id as officerId FROM case_officers WHERE staffNo = ?', [staffNo]);
+    await logAction(user, 'View Officer Profile', `Viewed officer profile ${staffNo}`);
+    res.json({ ...officer, psdHistory: cases });
+  } catch (error) {
+    console.error('GET officer error:', error.stack);
+    res.status(500).json({ error: 'Database error', details: error.message });
+  } finally {
+    if (db) await db.close();
   }
 });
 
-app.delete('/admin/permissions/:id', restrictToAdminOrPSDAdmin, async (req, res) => {
-  const { id } = req.params;
-
-  try {
-    const result = await db.run('DELETE FROM user_case_permissions WHERE id = ?', [id]);
-    if (result.changes === 0) return res.status(404).json({ error: 'Permission not found' });
-
-    await logAction(req.session.user, 'Delete Permission', `Deleted permission with ID ${id}`);
-    res.json({ message: 'Permission deleted successfully' });
-  } catch (err) {
-    console.error('Delete permission error:', err);
-    res.status(500).json({ error: 'Failed to delete permission' });
-  }
-});
-
-app.post('/export-case/:id', isAuthenticated, async (req, res) => {
-  const { id } = req.params;
+app.put('/officers/:staffNo', isPSDAdmin, (req, res) => {
+  const { staffNo } = req.params;
+  const { joiningDate, rank, dateOfBirth } = req.body;
   const user = req.session.user;
 
+  db.run(
+    'UPDATE officers SET joiningDate = ?, rank = ?, dateOfBirth = ? WHERE staffNo = ?',
+    [joiningDate || null, rank || null, dateOfBirth || null, staffNo],
+    function(err) {
+      if (err) {
+        console.error('Update officer error:', err);
+        return res.status(500).json({ error: 'Database error: Unable to update officer' });
+      }
+      if (this.changes === 0) return res.status(404).json({ error: 'Officer not found' });
+      logAction(user, 'Update Officer', `Updated officer ${staffNo}: joiningDate=${joiningDate}, rank=${rank}, dateOfBirth=${dateOfBirth}`);
+      res.json({ message: 'Officer updated successfully' });
+    }
+  );
+});
+
+app.delete('/officers/:staffNo', isPSDAdmin, async (req, res) => {
+  const { staffNo } = req.params;
+  const user = req.session.user;
+
+  let db;
   try {
-    const caseData = await db.get('SELECT * FROM cases WHERE id = ?', [id]);
-    if (!caseData) return res.status(404).json({ error: 'Case not found' });
+    db = await initDb();
 
-    const officers = await db.all('SELECT * FROM case_officers WHERE caseId = ?', [id]);
-    const files = await db.all('SELECT filePath, originalName FROM case_files WHERE caseId = ?', [id]);
-
-    const templatePath = path.join(__dirname, 'templates', 'case_export_template.docx');
-    if (!fs.existsSync(templatePath)) {
-      return res.status(500).json({ error: 'Export template not found' });
+    // Check if officer is linked to any cases
+    const caseOfficerRow = await db.get('SELECT staffNo FROM case_officers WHERE staffNo = ?', [staffNo]);
+    if (caseOfficerRow) {
+      return res.status(400).json({ error: 'Cannot delete officer: Officer is linked to one or more cases' });
     }
 
+    // Delete officer profile
+    const result = await db.run('DELETE FROM officers WHERE staffNo = ?', [staffNo]);
+    if (result.changes === 0) {
+      return res.status(404).json({ error: 'Officer not found' });
+    }
+
+    await logAction(user, 'Delete Officer', `Deleted officer ${staffNo}`);
+    res.json({ message: 'Officer deleted successfully' });
+  } catch (error) {
+    console.error('Delete officer error:', error.stack);
+    res.status(500).json({ error: 'Database error', details: error.message });
+  } finally {
+    if (db) await db.close();
+  }
+});
+
+// Database Backup Functionality
+const backupDir = path.join(__dirname, 'backups');
+if (!fs.existsSync(backupDir)) {
+  fs.mkdirSync(backupDir);
+}
+
+function backupDatabase() {
+  const source = path.join(__dirname, 'cases.db');
+  const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+  const destination = path.join(backupDir, `cases_backup_${timestamp}.db`);
+
+  fs.copyFile(source, destination, (err) => {
+    if (err) {
+      console.error('Database backup failed:', err);
+    } else {
+      console.log(`Database backed up successfully to ${destination}`);
+    }
+  });
+}
+
+setInterval(backupDatabase, 24 * 60 * 60 * 1000);
+backupDatabase();
+
+// Discipline Disclosure Report Endpoint
+app.post('/generate-disclosure-report', isAuthenticated, restrictToAdminOrPSDAdmin, async (req, res) => {
+  try {
+    const { rciNo, rgpNo, rtoNo, obNo, caseName, oicName, section, officers } = req.body;
+
+    async function getPsdHistory(staffId) {
+      const outcomes = [
+        'Management Advice', 'Warning', 'Final Written Warning',
+        'Reduction in Rank', 'Dismissal with Notice', 'Dismissal Without Notice'
+      ];
+      return new Promise((resolve, reject) => {
+        db.all(`
+          SELECT 
+            misconductMeetingDate AS date,
+            misconductOutcome,
+            NULL AS hearingOutcome,
+            breachOfStandards
+          FROM case_officers 
+          WHERE staffNo = ? AND misconductOutcome IN (${outcomes.map(() => '?').join(',')})
+          UNION ALL
+          SELECT 
+            grossMisconductHearingDate AS date,
+            NULL AS misconductOutcome,
+            hearingOutcome,
+            breachOfStandards
+          FROM case_officers 
+          WHERE staffNo = ? AND hearingOutcome IN (${outcomes.map(() => '?').join(',')})
+        `, [staffId, ...outcomes, staffId, ...outcomes], (err, rows) => {
+          if (err) {
+            console.error('Database error fetching PSD history:', err);
+            reject(err);
+          } else {
+            resolve(rows.map(row => {
+              const date = row.date ? new Date(row.date).toLocaleDateString('en-GB') : 'N/A';
+              return {
+                date: date,
+                outcome: row.misconductOutcome || row.hearingOutcome,
+                breaches: row.breachOfStandards || 'N/A'
+              };
+            }));
+          }
+        });
+      });
+    }
+
+    // Initialize docData with all fields empty
+    const docData = {
+      rciNo: rciNo || '',
+      rgpNo: rgpNo || '',
+      rtoNo: rtoNo || '',
+      obNo: obNo || '',
+      caseName: caseName || '',
+      oicName: oicName || '',
+      section: section || '',
+      dateSubmitted: new Date().toLocaleDateString('en-GB'), // Already dd/mm/yyyy
+      producedBy: req.session.name || 'Unknown'
+    };
+    for (let i = 1; i <= 8; i++) {
+      docData[`officerName${i}`] = '';
+      docData[`rankCollar${i}`] = '';
+      docData[`remarks${i}`] = '';
+    }
+
+    // Populate only provided officers
+    const officerData = await Promise.all(officers.map(async (officer, index) => {
+      const history = await getPsdHistory(officer.staffId);
+      const remarks = history.length > 0 
+        ? history.map(h => {
+            const breaches = h.breaches !== 'N/A' ? JSON.parse(h.breaches).join(', ') : '';
+            return `Date: ${h.date}, Outcome: ${h.outcome}, Breaches of Standards: ${breaches}`;
+          }).join('\n')
+        : 'NO TRACE';
+      return {
+        [`officerName${index + 1}`]: officer.name || '',
+        [`rankCollar${index + 1}`]: officer.rankCollar || '',
+        [`remarks${index + 1}`]: remarks
+      };
+    }));
+
+    // Merge officer data into docData
+    Object.assign(docData, ...officerData);
+
+    const templatePath = path.resolve(__dirname, 'Officers Disciplinary Report.docx');
+    if (!fs.existsSync(templatePath)) {
+      throw new Error('Template file not found');
+    }
     const content = fs.readFileSync(templatePath, 'binary');
     const zip = new PizZip(content);
     const doc = new Docxtemplater(zip, { paragraphLoop: true, linebreaks: true });
 
-    const data = {
-      caseId: caseData.id,
-      dateOccurrence: officers[0]?.dateOccurrence || 'N/A',
-      type: officers[0]?.type || 'N/A',
-      status: officers[0]?.status || 'N/A',
-      user: caseData.user,
-      officers: officers.map(o => ({
-        officer: o.officer,
-        staffNo: o.staffNo,
-        summary: o.summary || 'N/A',
-        breachOfStandards: o.breachOfStandards || 'N/A',
-        investigator: o.investigator || 'N/A',
-        severity: o.severity || 'N/A',
-        section17Date: o.section17Date || 'N/A',
-        policeFriend: o.policeFriend || 'N/A',
-        section18Date: o.section18Date || 'N/A',
-        interviewDate: o.interviewDate || 'N/A',
-        ioReportDate: o.ioReportDate || 'N/A',
-        raAssessment: o.raAssessment || 'N/A',
-        officerAdvisedOfReferral: o.officerAdvisedOfReferral || 'N/A',
-        section24ReplyToRA: o.section24ReplyToRA || 'N/A',
-        misconductMeetingDate: o.misconductMeetingDate || 'N/A',
-        misconductOutcome: o.misconductOutcome || 'N/A',
-        grossMisconductHearingDate: o.grossMisconductHearingDate || 'N/A',
-        hearingOutcome: o.hearingOutcome || 'N/A',
-        appealMade: o.appealMade || 'N/A',
-        appealLetterDate: o.appealLetterDate || 'N/A',
-        appealHearingDate: o.appealHearingDate || 'N/A',
-        appealOutcome: o.appealOutcome || 'N/A',
-        comments: o.comments || 'N/A'
-      })),
-      files: files.map(f => ({ name: f.originalName }))
-    };
-
-    doc.setData(data);
-    doc.render();
+    doc.render(docData);
 
     const buf = doc.getZip().generate({ type: 'nodebuffer' });
-    const outputPath = path.join(__dirname, 'exports', `${id}_export.docx`);
-    if (!fs.existsSync(path.dirname(outputPath))) {
-      fs.mkdirSync(path.dirname(outputPath));
-    }
-    fs.writeFileSync(outputPath, buf);
-
-    await logAction(user, 'Export Case', `Exported case ${id} as DOCX`);
-    res.download(outputPath, `${id}_export.docx`, (err) => {
-      if (err) {
-        console.error('Download error:', err);
-        res.status(500).json({ error: 'Failed to download exported file' });
-      }
-      fs.unlinkSync(outputPath); // Clean up after download
-    });
+    res.setHeader('Content-Disposition', `attachment; filename=Discipline_Disclosure_${caseName.replace(/\s+/g, '_') || 'Report'}.docx`);
+    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document');
+    logAction(req.session.user, 'Generate Disclosure Report', `Generated report for case ${caseName}`);
+    res.send(buf);
   } catch (error) {
-    console.error('Export case error:', error.stack);
-    res.status(500).json({ error: 'Failed to export case', details: error.message });
+    console.error('Error generating disclosure report:', error);
+    res.status(500).send('Error generating report');
   }
 });
 
-app.get('/search-officers', isAuthenticated, async (req, res) => {
-  const { query } = req.query;
-  if (!query) return res.status(400).json({ error: 'Search query is required' });
-
-  try {
-    const officers = await db.all(`
-      SELECT staffNo, name, rank 
-      FROM officers 
-      WHERE staffNo LIKE ? OR name LIKE ?
-      LIMIT 50
-    `, [`%${query}%`, `%${query}%`]);
-    res.json(officers);
-  } catch (error) {
-    console.error('Search officers error:', error.stack);
-    res.status(500).json({ error: 'Database error', details: error.message });
-  }
+// Error and 404 handlers (moved to the end)
+app.use((err, req, res, next) => {
+  console.error('Unhandled error:', err);
+  res.status(500).json({ error: 'Internal server error' });
 });
 
-app.get('/search-users', restrictToAdminOrPSDAdmin, async (req, res) => {
-  const { query } = req.query;
-  if (!query) return res.status(400).json({ error: 'Search query is required' });
-
-  try {
-    const users = await db.all(`
-      SELECT username, role, email, name 
-      FROM users 
-      WHERE username LIKE ? OR email LIKE ? OR name LIKE ?
-      LIMIT 50
-    `, [`%${query}%`, `%${query}%`, `%${query}%`]);
-    res.json(users);
-  } catch (error) {
-    console.error('Search users error:', error.stack);
-    res.status(500).json({ error: 'Database error', details: error.message });
-  }
+app.use((req, res) => {
+  console.log('404 - Method:', req.method, 'URL:', req.url);
+  res.status(404).json({ error: 'Route not found' });
 });
 
-app.delete('/case-files/:fileId', restrictToPSDOrHigher, async (req, res) => {
-  const { fileId } = req.params;
-  const user = req.session.user;
-
-  try {
-    const fileRow = await db.get('SELECT caseId, filePath, uploadedBy FROM case_files WHERE id = ?', [fileId]);
-    if (!fileRow) return res.status(404).json({ error: 'File not found' });
-
-    const caseRow = await db.get('SELECT user FROM cases WHERE id = ?', [fileRow.caseId]);
-    if (!caseRow) return res.status(404).json({ error: 'Case not found' });
-
-    const permissionRow = await db.get('SELECT canEdit FROM user_case_permissions WHERE caseId = ? AND username = ?', [fileRow.caseId, user]);
-    const userRow = await db.get('SELECT role FROM users WHERE username = ?', [user]);
-
-    const isOwner = caseRow.user === user;
-    const hasEditPermission = permissionRow && permissionRow.canEdit === 1;
-    const isAdminOrPSDAdmin = userRow.role === 'admin' || userRow.role === 'psd admin';
-
-    if (!isAdminOrPSDAdmin && !isOwner && !hasEditPermission) {
-      return res.status(403).json({ error: 'Permission denied: Cannot delete this file' });
-    }
-
-    await cloudinary.uploader.destroy(fileRow.filePath.split('/').slice(-2).join('/').split('.')[0], { resource_type: 'raw' });
-    const result = await db.run('DELETE FROM case_files WHERE id = ?', [fileId]);
-    if (result.changes === 0) return res.status(404).json({ error: 'File not found' });
-
-    await logAction(user, 'Delete File', `Deleted file ${fileId} from case ${fileRow.caseId}`);
-    res.json({ message: 'File deleted successfully' });
-  } catch (error) {
-    console.error('Delete file error:', error.stack);
-    res.status(500).json({ error: 'Failed to delete file', details: error.message });
-  }
+// Start server
+app.listen(PORT, HOST, () => {
+  console.log(`POLARIS RMS Version 1 Server running on http://${HOST}:${PORT}`);
 });
 
-// Start server and initialize database
-async function startServer() {
-  try {
-    db = await initDb();
-    await setupDatabase(db);
-    app.listen(PORT, HOST, () => {
-      console.log(`POLARIS RMS Version 1 Server running on http://${HOST}:${PORT}`);
-    });
-  } catch (err) {
-    console.error('Server startup error:', err);
-    process.exit(1);
-  }
-}
-
-startServer();
+process.on('SIGINT', () => {
+  db.close();
+  process.exit();
+});

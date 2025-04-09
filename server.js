@@ -121,16 +121,21 @@ console.log('Cloudinary config:', cloudinary.config());
 const dangerousExtensions = ['exe', 'bat', 'sh', 'cmd', 'dll', 'js', 'vbs', 'ps1'];
 const storage = new CloudinaryStorage({
   cloudinary: cloudinary,
-  params: { 
-    folder: 'case_files', 
-    public_id: (req, file) => `${req.params.id}/${file.originalname.split('.')[0]}-${Date.now()}`,
-    resource_type: (req, file) => {
-      const fileExt = file.originalname.split('.').pop().toLowerCase();
-      if (dangerousExtensions.includes(fileExt)) {
-        throw new Error(`File type .${fileExt} is not allowed`);
-      }
-      return ['docx', 'doc', 'pdf', 'txt', 'zip'].includes(fileExt) ? 'raw' : 'auto';
+  params: (req, file) => {
+    // Use req.body.id for POST /cases, req.params.id for PUT /cases/:id
+    const caseId = decodeURIComponent(req.body.id || req.params.id || 'unknown').replace('/', '-');
+    const fileExt = file.originalname.split('.').pop().toLowerCase();
+    if (dangerousExtensions.includes(fileExt)) {
+      throw new Error(`File type .${fileExt} is not allowed`);
     }
+    // Include the file extension in the public_id
+    const fileBaseName = file.originalname.split('.').slice(0, -1).join('.');
+    const publicId = `${caseId}/${fileBaseName}-${Date.now()}.${fileExt}`;
+    return {
+      folder: 'case_files',
+      public_id: publicId,
+      resource_type: ['docx', 'doc', 'pdf', 'txt', 'zip', 'csv'].includes(fileExt) ? 'raw' : 'auto'
+    };
   }
 });
 const upload = multer({ storage });
@@ -380,12 +385,23 @@ app.get('/cases/:id', isAuthenticated, async (req, res) => {
   try {
     db = await initDb();
     const rows = await db.all(`
-      SELECT c.id AS caseId, c.user, co.*, cf.id AS fileId, cf.filePath, cf.originalName, cf.uploadDate, cf.uploadedBy
+      SELECT 
+        c.id AS caseId, 
+        c.user, 
+        co.*, 
+        cf.id AS fileId, 
+        cf.filePath, 
+        cf.originalName, 
+        cf.uploadDate, 
+        cf.uploadedBy, 
+        cf.staffNo
       FROM cases c
       LEFT JOIN case_officers co ON c.id = co.caseId
       LEFT JOIN case_files cf ON c.id = cf.caseId
       WHERE c.id = ?
     `, [id]);
+
+    console.log('Raw rows from /cases/:id:', JSON.stringify(rows, null, 2));
 
     if (!rows.length) {
       console.log('Case not found:', id);
@@ -393,11 +409,11 @@ app.get('/cases/:id', isAuthenticated, async (req, res) => {
     }
 
     const caseData = { id: rows[0].caseId, user: rows[0].user, officers: [], files: [] };
-    const officerMap = new Map(); // Deduplicate officers by id
-    const fileMap = new Map();    // Deduplicate files by filePath
+    const officerMap = new Map();
+    const fileMap = new Map();
 
     for (const row of rows) {
-      if (row.officer && !officerMap.has(row.id)) {
+      if (row.id && !officerMap.has(row.id)) {
         officerMap.set(row.id, {
           id: row.id,
           caseId: row.caseId,
@@ -429,24 +445,26 @@ app.get('/cases/:id', isAuthenticated, async (req, res) => {
           dateOccurrence: row.dateOccurrence
         });
       }
-      if (row.fileId && !fileMap.has(row.filePath)) {
-        fileMap.set(row.filePath, {
-          id: row.fileId,
+      console.log('Processing row for file:', { fileId: row.fileId, caseId: row.caseId });
+      if (row.fileId && !fileMap.has(row.fileId)) {
+        fileMap.set(row.fileId, {
+          id: row.fileId, // Map fileId to id
           caseId: row.caseId,
           filePath: row.filePath,
           originalName: row.originalName,
           uploadDate: row.uploadDate,
-          uploadedBy: row.uploadedBy
+          uploadedBy: row.uploadedBy,
+          staffNo: row.staffNo
         });
       }
     }
+
     caseData.officers = [...officerMap.values()];
     caseData.files = [...fileMap.values()];
     console.log('Sending case data:', JSON.stringify(caseData, null, 2));
-    
-    // Add audit logging
+
     await logAction(user, 'View Case', `Viewed case ${id}`);
-    
+
     res.json(caseData);
   } catch (error) {
     console.error('GET error:', error.stack);
@@ -603,12 +621,24 @@ app.get('/cases', isAuthenticated, (req, res) => {
       const total = caseRows.length;
 
       caseRows.forEach((caseItem, index) => {
-        db.all('SELECT caseId, filePath, originalName, uploadDate, uploadedBy FROM case_files WHERE caseId = ?', [caseItem.id], (err, files) => {
-          if (err) console.error('Error fetching files for', caseItem.id, ':', err);
-          else casesWithDetails[index].files = files || [];
+        // Fetch files for the case, including staffNo
+        db.all('SELECT id AS fileId, caseId, filePath, originalName, uploadDate, uploadedBy, staffNo FROM case_files WHERE caseId = ?', [caseItem.id], (err, files) => {
+          if (err) {
+            console.error('Error fetching files for', caseItem.id, ':', err);
+            casesWithDetails[index].files = [];
+          } else {
+            casesWithDetails[index].files = files || [];
+          }
+
+          // Fetch officers for the case
           db.all('SELECT * FROM case_officers WHERE caseId = ?', [caseItem.id], (err, officers) => {
-            if (err) console.error('Error fetching officers for', caseItem.id, ':', err);
-            else casesWithDetails[index].officers = officers || [];
+            if (err) {
+              console.error('Error fetching officers for', caseItem.id, ':', err);
+              casesWithDetails[index].officers = [];
+            } else {
+              casesWithDetails[index].officers = officers || [];
+            }
+
             completed++;
             if (completed === total) {
               console.log('Sending cases:', casesWithDetails);
@@ -972,26 +1002,51 @@ app.post('/cases', restrictToPSDOrHigher, upload.array('files'), async (req, res
       status || '', officerAdvisedOfReferral || '', section24ReplyToRA || ''
     ]);
 
-    // Handle file uploads
+    // Handle file uploads to Cloudinary
     if (req.files && req.files.length > 0) {
-      const fileInserts = req.files.map(file => [id, file.url, file.originalname, user]);
-      await db.run(
-        'INSERT INTO case_files (caseId, filePath, originalName, uploadedBy) VALUES ' +
-        fileInserts.map(() => '(?, ?, ?, ?)').join(','),
-        fileInserts.flat()
-      );
+      console.log('Uploading files for case:', id, 'Files:', req.files.map(f => ({ name: f.originalname })));
+      const fileInserts = [];
+      
+      for (const file of req.files) {
+        // The file has already been uploaded to Cloudinary by multer-storage-cloudinary
+        // req.file.cloudinary contains the Cloudinary response
+        const cloudinaryUrl = file.path; // multer-storage-cloudinary sets file.path to the Cloudinary URL
+        const uploadDate = new Date().toISOString();
+        
+        // Prepare the file insert data
+        fileInserts.push([
+          id,                     // caseId
+          cloudinaryUrl,          // filePath (Cloudinary URL)
+          file.originalname,      // originalName
+          uploadDate,             // uploadedDate
+          user,                   // uploadedBy
+          staffNo                 // staffNo
+        ]);
+      }
+
+      // Insert files into case_files table
+      if (fileInserts.length > 0) {
+        await db.run(
+          'INSERT INTO case_files (caseId, filePath, originalName, uploadDate, uploadedBy, staffNo) VALUES ' +
+          fileInserts.map(() => '(?, ?, ?, ?, ?, ?)').join(','),
+          fileInserts.flat()
+        );
+        console.log('Files inserted into case_files:', fileInserts);
+      }
     }
 
     // Commit transaction
     await db.run('COMMIT');
-    await logAction(user, 'Create Case', `Created case ${id} with officer ${staffNo}`);
-    res.status(201).json({ message: 'Case added successfully', id });
+    await logAction(user, 'Create Case', `Created case ${id}`);
+    res.json({ message: 'Case created successfully' });
   } catch (error) {
-    console.error('Create case error:', error.stack);
-    if (db) await db.run('ROLLBACK').catch(err => console.error('Rollback error:', err));
-    res.status(500).json({ error: 'Database error', details: error.message });
+    console.error('POST /cases error:', error.stack);
+    if (db) {
+      await db.run('ROLLBACK').catch(rollbackErr => console.error('Rollback error:', rollbackErr.stack));
+    }
+    res.status(500).json({ error: 'Failed to create case', details: error.message });
   } finally {
-    if (db) await db.close();
+    if (db) await db.close().catch(err => console.error('DB close error:', err.stack));
   }
 });
 
@@ -1103,7 +1158,7 @@ app.put('/cases/:id', restrictToPSDOrHigher, upload.array('files'), async (req, 
   const user = req.session.user;
   const files = req.files || [];
   const officerData = { ...req.body };
-  console.log('PUT /cases/:id - ID:', id, 'User:', user, 'Files:', files.length, 'File Details:', files.map(f => ({ name: f.originalname, url: f.url, public_id: f.public_id })), 'Body:', officerData);
+  console.log('PUT /cases/:id - ID:', id, 'User:', user, 'Files:', files.length, 'File Details:', files.map(f => ({ name: f.originalname, path: f.path })), 'Body:', officerData);
 
   if (!officerData.officerId) {
     console.log('Missing officerId');
@@ -1118,7 +1173,7 @@ app.put('/cases/:id', restrictToPSDOrHigher, upload.array('files'), async (req, 
     const [caseRow, userRow, permissionRow] = await Promise.all([
       db.get('SELECT user FROM cases WHERE id = ?', [id]),
       db.get('SELECT role FROM users WHERE username = ?', [user]),
-      db.get('SELECT canEdit FROM user_case_permissions WHERE caseId = ? AND username = ?', [id, user]) // Fixed table name
+      db.get('SELECT canEdit FROM user_case_permissions WHERE caseId = ? AND username = ?', [id, user])
     ]);
 
     if (!caseRow) {
@@ -1138,6 +1193,13 @@ app.put('/cases/:id', restrictToPSDOrHigher, upload.array('files'), async (req, 
     if (!officerRow) {
       console.log('Officer not found:', officerData.officerId);
       return res.status(404).json({ error: 'Officer not found' });
+    }
+
+    // Fetch the staffNo from case_officers
+    const staffNo = officerRow.staffNo;
+    if (!staffNo) {
+      console.log('Staff number not found for officer:', officerData.officerId);
+      return res.status(400).json({ error: 'Staff number not found for this officer' });
     }
 
     await db.run('BEGIN TRANSACTION');
@@ -1183,19 +1245,27 @@ app.put('/cases/:id', restrictToPSDOrHigher, upload.array('files'), async (req, 
     }
 
     if (files.length) {
-      console.log('Processing uploaded files...');
-      const fileValues = files.map(file => [
-        id,
-        file.url,
-        file.originalname,
-        user,
-        new Date().toISOString()
-      ]);
+      console.log('Processing uploaded files for case:', id, 'Files:', files.map(f => ({ name: f.originalname, path: f.path })));
+      const fileValues = files.map(file => {
+        // Determine if the file is a PDF
+        const fileExt = file.originalname.split('.').pop().toLowerCase();
+        const isPdf = fileExt === 'pdf';
+        // Modify the filePath to include fl_attachment:false for PDFs
+        const filePath = isPdf ? file.path.replace('/raw/upload/', '/raw/upload/fl_attachment:false/') : file.path;
+        return [
+          id,                     // caseId
+          filePath,               // filePath (Cloudinary URL, modified for PDFs)
+          file.originalname,      // originalName
+          user,                   // uploadedBy
+          new Date().toISOString(), // uploadDate
+          staffNo                 // staffNo (fetched from case_officers)
+        ];
+      });
       await db.run(
-        `INSERT INTO case_files (caseId, filePath, originalName, uploadedBy, uploadDate) VALUES ${files.map(() => '(?,?,?,?,?)').join(',')}`,
+        `INSERT INTO case_files (caseId, filePath, originalName, uploadedBy, uploadDate, staffNo) VALUES ${files.map(() => '(?,?,?,?,?,?)').join(',')}`,
         fileValues.flat()
       );
-      console.log('Files inserted:', files.map(f => f.originalname));
+      console.log('Files inserted into case_files:', fileValues.map(f => ({ caseId: f[0], filePath: f[1], originalName: f[2] })));
     }
 
     await db.run('COMMIT');
@@ -1501,7 +1571,8 @@ app.get('/cases-by-officer', isAuthenticated, (req, res) => {
       if (err) return res.status(500).json({ error: 'Database error: Unable to fetch cases' });
       if (!rows.length) return res.json([]);
 
-      db.all('SELECT caseId, filePath, originalName, uploadDate, uploadedBy FROM case_files', (err, files) => {
+      // Fetch files for the officer across all cases
+      db.all('SELECT id AS fileId, caseId, filePath, originalName, uploadDate, uploadedBy, staffNo FROM case_files WHERE staffNo = ?', [staffNo], (err, files) => {
         if (err) return res.status(500).json({ error: 'Database error: Unable to fetch case files' });
 
         const casesWithDetails = [];
@@ -1511,7 +1582,7 @@ app.get('/cases-by-officer', isAuthenticated, (req, res) => {
             caseEntry = {
               caseId: row.caseId,
               user: row.user,
-              files: files.filter(f => f.caseId === row.caseId).map(f => f.filePath),
+              files: files.filter(f => f.caseId === row.caseId), // Only include files for this case and officer
               officers: []
             };
             casesWithDetails.push(caseEntry);
@@ -1546,11 +1617,99 @@ app.get('/cases-by-officer', isAuthenticated, (req, res) => {
             comments: row.comments
           });
         });
-        console.log('Cases by officer retrieved:', casesWithDetails); // Debug log
+        console.log('Cases by officer retrieved:', casesWithDetails);
         res.json(casesWithDetails);
       });
     });
   });
+});
+
+app.get('/case-officer-files/:caseId/:staffNo', isAuthenticated, async (req, res) => {
+  const caseId = decodeURIComponent(req.params.caseId);
+  const staffNo = decodeURIComponent(req.params.staffNo);
+  const user = req.session.user;
+  console.log('GET /case-officer-files - Case ID:', caseId, 'Staff No:', staffNo, 'User:', user);
+
+  if (!user) return res.status(401).json({ error: 'Not authenticated' });
+
+  let db;
+  try {
+    db = await initDb();
+    const files = await db.all(`
+      SELECT 
+        id AS fileId, 
+        caseId, 
+        filePath, 
+        originalName, 
+        staffNo, 
+        uploadedBy, 
+        uploadDate 
+      FROM case_files 
+      WHERE caseId = ? AND staffNo = ?
+    `, [caseId, staffNo]);
+
+    console.log('Raw files from /case-officer-files:', JSON.stringify(files, null, 2));
+    const mappedFiles = files.map(file => {
+      const mappedFile = {
+        id: file.fileId,
+        caseId: file.caseId,
+        filePath: file.filePath,
+        originalName: file.originalName,
+        staffNo: file.staffNo,
+        uploadedBy: file.uploadedBy,
+        uploadDate: file.uploadDate
+      };
+      delete mappedFile.fileId; // Ensure fileId is not included in the response
+      return mappedFile;
+    });
+    console.log('Sending case-officer files data:', JSON.stringify(mappedFiles, null, 2));
+    res.json(mappedFiles);
+  } catch (error) {
+    console.error('Error fetching case-officer files:', error.stack);
+    res.status(500).json({ error: 'Internal server error', details: error.message });
+  } finally {
+    if (db) await db.close().catch(err => console.error('DB close error:', err.stack));
+  }
+});
+
+app.get('/officer-files/:staffNo', isAuthenticated, async (req, res) => {
+  const staffNo = decodeURIComponent(req.params.staffNo);
+  const user = req.session.user;
+  if (!user) return res.status(401).json({ error: 'Not authenticated' });
+
+  let db;
+  try {
+    db = await initDb();
+    const files = await db.all(`
+      SELECT 
+        id AS fileId, 
+        caseId, 
+        filePath, 
+        originalName, 
+        staffNo, 
+        uploadedBy, 
+        uploadDate 
+      FROM case_files 
+      WHERE staffNo = ?
+    `, [staffNo]);
+    console.log('Raw files from /officer-files/:staffNo:', JSON.stringify(files, null, 2));
+    const mappedFiles = files.map(file => ({
+      id: file.fileId, // Map fileId to id
+      caseId: file.caseId,
+      filePath: file.filePath,
+      originalName: file.originalName,
+      staffNo: file.staffNo,
+      uploadedBy: file.uploadedBy,
+      uploadDate: file.uploadDate
+    }));
+    console.log('Sending officer files data:', JSON.stringify(mappedFiles, null, 2));
+    res.json(mappedFiles);
+  } catch (error) {
+    console.error('Error fetching officer files:', error.stack);
+    res.status(500).json({ error: 'Internal server error', details: error.message });
+  } finally {
+    if (db) await db.close().catch(err => console.error('DB close error:', err.stack));
+  }
 });
 
 app.post('/admin/users', isPSDAdmin, async (req, res) => {
@@ -1591,11 +1750,40 @@ app.post('/admin/users', isPSDAdmin, async (req, res) => {
   }
 });
 
-app.get('/admin/users', isPSDAdmin, (req, res) => {
-  db.all('SELECT username, role, email, name FROM users', (err, rows) => {
-    if (err) return res.status(500).json({ error: 'Database error: Unable to fetch users' });
-    res.json(rows);
-  });
+// Endpoint to view a file by its ID
+app.get('/view-file/:id', async (req, res) => {
+  const fileId = req.params.id;
+  let db;
+  try {
+    db = await initDb();
+    const file = await db.get('SELECT filePath, originalName FROM case_files WHERE id = ?', [fileId]);
+    if (!file) {
+      return res.status(404).json({ error: 'File not found' });
+    }
+
+    // Dynamically import node-fetch
+    const { default: fetch } = await import('node-fetch');
+
+    // Fetch the file from Cloudinary
+    const response = await fetch(file.filePath);
+    if (!response.ok) {
+      throw new Error(`Failed to fetch file from Cloudinary: ${response.statusText}`);
+    }
+
+    // Set headers to force inline viewing
+    res.set({
+      'Content-Type': 'application/pdf',
+      'Content-Disposition': `inline; filename="${file.originalName}"`
+    });
+
+    // Stream the file to the browser
+    response.body.pipe(res);
+  } catch (error) {
+    console.error('Error viewing file:', error.stack);
+    res.status(500).json({ error: 'Internal server error', details: error.message });
+  } finally {
+    if (db) await db.close().catch(err => console.error('DB close error:', err.stack));
+  }
 });
 
 app.get('/admin/permissions', restrictToAdminOrPSDAdmin, async (req, res) => {
@@ -1848,6 +2036,44 @@ app.get('/officers/:staffNo', restrictToAdminOrPSDAdmin, async (req, res) => {
     res.status(500).json({ error: 'Database error', details: error.message });
   } finally {
     if (db) await db.close();
+  }
+});
+
+app.get('/files', isAuthenticated, async (req, res) => {
+  const user = req.session.user;
+  if (!user) return res.status(401).json({ error: 'Not authenticated' });
+
+  let db;
+  try {
+    db = await initDb();
+    const files = await db.all(`
+      SELECT 
+        id AS fileId, 
+        caseId, 
+        filePath, 
+        originalName, 
+        staffNo, 
+        uploadedBy, 
+        uploadDate 
+      FROM case_files
+    `);
+    console.log('Raw files from /files:', JSON.stringify(files, null, 2));
+    const mappedFiles = files.map(file => ({
+      id: file.fileId, // Map fileId to id
+      caseId: file.caseId,
+      filePath: file.filePath,
+      originalName: file.originalName,
+      staffNo: file.staffNo,
+      uploadedBy: file.uploadedBy,
+      uploadDate: file.uploadDate
+    }));
+    console.log('Sending files data:', JSON.stringify(mappedFiles, null, 2));
+    res.json(mappedFiles);
+  } catch (error) {
+    console.error('Error fetching files:', error.stack);
+    res.status(500).json({ error: 'Internal server error', details: error.message });
+  } finally {
+    if (db) await db.close().catch(err => console.error('DB close error:', err.stack));
   }
 });
 

@@ -6,7 +6,8 @@
   <script src="https://cdn.jsdelivr.net/npm/chart.js@3.9.1/dist/chart.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2.0.0/dist/chartjs-plugin-datalabels.min.js"></script>
   <style>
-    body { font-family: Arial, sans-serif; margin: 0; padding: 0; background-color: #EDEDED; }
+    body { font-family: Arial, sans-serif; margin: 0; padding: 0; background-color: #EDEDED;}
+
     header { background-color: #2a2d37; color: white; padding: 15px; text-align: center; }
     .container {
       max-width: 1200px;
@@ -803,7 +804,8 @@
         <button class="tablink" id="chart-tab-btn" style="display: none;" onclick="openTab(event, 'chart-tab')">Charts</button>
         <button class="tablink" id="admin-tab" style="display: none;" onclick="openTab(event, 'admin-area')">Admin Area</button>
         <button class="tablink" id="officer-profiles-tab" onclick="openTab(event, 'officer-profiles')">Officer Profiles</button>
-        <button class="tablink" id="disclosure-tab" onclick="openTab(event, 'disclosure-area')" style="display: none;">Disc Report</button>     
+        <button class="tablink" id="disclosure-tab" onclick="openTab(event, 'disclosure-area')" style="display: none;">Disc Report</button>   
+        <button id="case-files-tab" class="tablink" onclick="openTab(event, 'case-files')">Case Files</button>  
       </div>
 
       <div id="cases" class="tabcontent">
@@ -1733,8 +1735,35 @@
         <div id="disclosure-result"></div>
       </div>
 
+      <div id="case-files" class="tabcontent">
+        <h2>All Uploaded Files</h2>
+        <table id="all-files-table" border="1">
+          <thead>
+            <tr>
+              <th>Case ID</th>
+              <th>File Name</th>
+              <th>Staff No</th>
+              <th>Uploaded By</th>
+              <th>Upload Date</th>
+            </tr>
+          </thead>
+          <tbody></tbody>
+        </table>
+      </div>
       
   <script>
+
+window.logFileView = function(filePath, originalName) {
+  fetch(`${BASE_URL}/log-file-view`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ filePath, originalName }),
+    credentials: 'include'
+  })
+    .then(response => response.json())
+    .then(data => console.log('File view logged:', data))
+    .catch(error => console.error('Error logging file view:', error));
+};
 
 const BASE_URL = window.location.origin;
 
@@ -2324,6 +2353,7 @@ function openTab(evt, tabName, isProfileView = false) {
     document.getElementById('chart-tab-btn').style.display = (userRole === 'admin' || userRole === 'psd admin') ? 'block' : 'none';
     document.getElementById('admin-tab').style.display = (userRole === 'admin' || userRole === 'psd admin') ? 'block' : 'none';
     document.getElementById('disclosure-tab').style.display = (userRole === 'admin' || userRole === 'psd admin') ? 'block' : 'none';
+    document.getElementById('case-files-tab').style.display = (userRole === 'admin' || userRole === 'psd admin') ? 'block' : 'none';
   }
 
   // Tab-specific logic
@@ -2354,6 +2384,8 @@ function openTab(evt, tabName, isProfileView = false) {
     const officerList = document.getElementById('disclosure-officer-list');
     officerCount = officerList ? officerList.getElementsByClassName('officer-entry').length + 1 : 1;
     resetDisclosureForm();
+  } else if (tabName === 'case-files') {
+    loadAllFiles();
   }
 
   // Reset disclosure form when leaving disclosure-area
@@ -2595,17 +2627,16 @@ function calculateWorkingDays(startDateStr, endDateStr) {
 }
 
 function renderCaseDetailsUpdated(caseItem, caseId, officerId, allOfficers = false) {
+  console.log('Rendering case with ID:', caseId);
   console.log('caseItem:', caseItem);
-  console.log('Using caseItem.id:', caseItem.id);
+  console.log('caseItem.files:', caseItem.files);
   const detailsDiv = document.getElementById('case-details');
   if (!detailsDiv) return;
 
-  // Officer selection
   const officersToRender = allOfficers 
     ? caseItem.officers || [] 
     : [caseItem.officers?.find(o => o.id == officerId) || caseItem.officers?.[0] || {}];
 
-  // Officer HTML with minimal template literals
   const officersHTML = officersToRender.map(officerData => {
     const breaches = parseBreaches(officerData.breachOfStandards);
     const styles = {
@@ -2645,20 +2676,52 @@ function renderCaseDetailsUpdated(caseItem, caseId, officerId, allOfficers = fal
     `;
   }).join('');
 
-  // Deduped files
-  const uniqueFiles = [...new Map((caseItem.files || []).map(f => [f.filePath, f])).values()];
+  const validFiles = (caseItem.files || []).filter(f => {
+    const fileId = f.id ?? f.fileId; // Use f.id if available, otherwise fall back to f.fileId
+    const isValid = f && fileId && !isNaN(parseInt(fileId));
+    if (!isValid) console.log('Filtered out file in renderCaseDetailsUpdated:', f);
+    return isValid;
+  });
+  const uniqueFiles = [...new Map(validFiles.map(f => [f.id ?? f.fileId, f])).values()];
+  console.log('Unique files after deduplication:', uniqueFiles);
   const filesHTML = uniqueFiles.length 
-    ? uniqueFiles.map(f => `<li><a href="${BASE_URL}${escapeHtml(f.filePath)}" target="_blank" onclick="logFileView('${escapeHtml(f.filePath)}', '${escapeHtml(f.originalName)}')">${escapeHtml(f.originalName)}</a> (Uploaded: ${escapeHtml(f.uploadDate)}, By: ${escapeHtml(f.uploadedBy)})</li>`).join('')
-    : '<li>No files attached</li>';
+    ? uniqueFiles
+        .map(f => {
+          const fileId = f.id ?? f.fileId;
+          console.log('Rendering file with ID:', fileId);
+          const isPdf = f.originalName && f.originalName.toLowerCase().endsWith('.pdf');
+          const fileUrl = isPdf ? `${BASE_URL}/view-file/${fileId}` : `${BASE_URL}${escapeHtml(f.filePath || '#')}`;
+          return `
+            <tr>
+              <td>
+                <a href="${fileUrl}" rel="noopener noreferrer" onclick="event.preventDefault(); logFileView('${escapeHtml(f.filePath || '#')}', '${escapeHtml(f.originalName || 'Unnamed File')}'); window.open('${fileUrl}', '_blank');">
+                  ${escapeHtml(f.originalName || 'Unnamed File')}
+                </a>
+              </td>
+              <td>${escapeHtml(f.staffNo || 'N/A')}</td>
+              <td>${escapeHtml(f.uploadedBy || 'N/A')}</td>
+              <td>${formatDate(f.uploadDate)}</td>
+            </tr>
+          `;
+        }).join('')
+    : '<tr><td colspan="4">No files attached</td></tr>';
 
-  // Final render
   detailsDiv.innerHTML = `
     <div class="case-details">
       <h3>Case Details: ${escapeHtml(caseItem.id)}</h3>
       ${officersHTML}
-      <p><b>Files:</b> ${uniqueFiles.length ? '📄' : ''}</p>
-      <h4>Detailed Files:</h4>
-      <ul>${filesHTML}</ul>
+      <h4>All Files for Case ${escapeHtml(caseItem.id)}</h4>
+      <table border="1">
+        <thead>
+          <tr>
+            <th>File Name</th>
+            <th>Staff No</th>
+            <th>Uploaded By</th>
+            <th>Upload Date</th>
+          </tr>
+        </thead>
+        <tbody>${filesHTML}</tbody>
+      </table>
       <button onclick="document.getElementById('case-details').style.display='none';document.getElementById('case-list').style.display='table'">Close</button>
     </div>
   `;
@@ -4366,22 +4429,68 @@ function viewCase(caseId, officerId, allOfficers = false) {
     })
     .then(caseItem => {
       console.log('Case data fetched:', caseItem);
-      renderCaseDetailsUpdated(caseItem, caseId, officerId, allOfficers); // Pass allOfficers flag
-      document.querySelector('#cases').style.display = 'block';
-      openTab({ currentTarget: document.querySelector('.tablink[onclick*="cases"]') }, 'cases');
-      const detailsDiv = document.getElementById('case-details');
-      const header = detailsDiv.querySelector('h3');
-      if (header) {
-        header.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      if (!allOfficers) {
+        // Fetch officer-specific files
+        const officerData = caseItem.officers?.find(o => o.id == officerId) || caseItem.officers?.[0] || {};
+        if (officerData.staffNo) {
+          console.log('Fetching files for staffNo:', officerData.staffNo);
+          fetch(`${BASE_URL}/case-officer-files/${encodeURIComponent(caseId)}/${encodeURIComponent(officerData.staffNo)}`, { credentials: 'include' })
+            .then(response => {
+              if (!response.ok) throw new Error('Fetch failed: ' + response.status);
+              return response.json();
+            })
+            .then(files => {
+              console.log('Officer-specific files fetched:', files);
+              // Replace the caseItem.files with officer-specific files
+              caseItem.files = files;
+              renderCaseDetailsUpdated(caseItem, caseId, officerId, allOfficers);
+              document.querySelector('#cases').style.display = 'block';
+              openTab({ currentTarget: document.querySelector('.tablink[onclick*="cases"]') }, 'cases');
+              const detailsDiv = document.getElementById('case-details');
+              const header = detailsDiv.querySelector('h3');
+              if (header) {
+                header.scrollIntoView({ behavior: 'smooth', block: 'start' });
+              } else {
+                detailsDiv.scrollIntoView({ behavior: 'smooth', block: 'start' });
+              }
+            })
+            .catch(error => {
+              console.error('Fetch officer files error:', error);
+              // Fallback to rendering without officer-specific files
+              renderCaseDetailsUpdated(caseItem, caseId, officerId, allOfficers);
+            });
+        } else {
+          console.log('No staffNo available for officer, rendering with all files');
+          renderCaseDetailsUpdated(caseItem, caseId, officerId, allOfficers);
+          document.querySelector('#cases').style.display = 'block';
+          openTab({ currentTarget: document.querySelector('.tablink[onclick*="cases"]') }, 'cases');
+          const detailsDiv = document.getElementById('case-details');
+          const header = detailsDiv.querySelector('h3');
+          if (header) {
+            header.scrollIntoView({ behavior: 'smooth', block: 'start' });
+          } else {
+            detailsDiv.scrollIntoView({ behavior: 'smooth', block: 'start' });
+          }
+        }
       } else {
-        detailsDiv.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        // Render with all files for the case
+        renderCaseDetailsUpdated(caseItem, caseId, officerId, allOfficers);
+        document.querySelector('#cases').style.display = 'block';
+        openTab({ currentTarget: document.querySelector('.tablink[onclick*="cases"]') }, 'cases');
+        const detailsDiv = document.getElementById('case-details');
+        const header = detailsDiv.querySelector('h3');
+        if (header) {
+          header.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        } else {
+          detailsDiv.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        }
       }
     })
     .catch(error => {
       console.error('View case error:', error);
       const caseItem = allCases.find(c => c.id === caseId);
       if (caseItem) {
-        renderCaseDetailsUpdated(caseItem, caseId, officerId, allOfficers); // Pass allOfficers flag
+        renderCaseDetailsUpdated(caseItem, caseId, officerId, allOfficers);
         document.querySelector('#cases').style.display = 'block';
         openTab({ currentTarget: document.querySelector('.tablink[onclick*="cases"]') }, 'cases');
         const detailsDiv = document.getElementById('case-details');
@@ -4406,12 +4515,6 @@ function backToCases() {
 }
 
 function viewOfficer(staffNo) {
-  if (userRole !== 'admin' && userRole !== 'psd admin') {
-    alert('You are not authorized to view officer profiles.');
-    console.log('Unauthorized attempt to view officer profile by:', userRole);
-    return;
-  }
-
   console.log('Viewing officer:', staffNo);
   fetch(`${BASE_URL}/officers/${encodeURIComponent(staffNo)}`, { credentials: 'include' })
     .then(response => {
@@ -4453,28 +4556,101 @@ function viewOfficer(staffNo) {
         yearsOfService = Math.floor((today - joinDate) / (1000 * 60 * 60 * 24 * 365.25));
       }
 
-      const detailsHTML = `
-        <h3>Officer Profile: ${officer.name || 'Unknown'}</h3>
-        <p><strong>Staff No.:</strong> ${officer.staffNo || ''}</p>
-        <p><strong>Name:</strong> ${officer.name || ''}</p>
-        <p><strong>Joining Date:</strong> ${officer.joiningDate || ''}</p>
-        <p><strong>Years of Service:</strong> ${yearsOfService || 'N/A'}</p>
-        <p><strong>Rank:</strong> ${officer.rank || ''}</p>
-        <p><strong>Date of Birth:</strong> ${officer.dateOfBirth || ''}</p>
-        <p><strong>Age:</strong> ${age || 'N/A'}</p>
-        ${officer.photoPath ? `<p><strong>Photo:</strong> <img src="${officer.photoPath}" alt="Officer Photo" style="max-width: 200px;"></p>` : ''}
-        <h4>PSD History:</h4>
-        <div>${psdHistory}</div>
-        <button onclick="backToOfficerProfiles(event)">Back to Officer Profiles</button>
-        <button onclick="openTab(event, 'cases')">Return to Cases</button>
-      `;
-      const detailsDiv = document.getElementById('officer-details');
-      detailsDiv.innerHTML = detailsHTML;
-      detailsDiv.style.display = 'block';
-      // Pass a flag to indicate profile view
-      openTab({ currentTarget: document.querySelector('.tablink[onclick*="officer-profiles"]') }, 'officer-profiles', true);
-      const header = detailsDiv.querySelector('h3');
-      if (header) header.scrollIntoView({ behavior: 'smooth' });
+      fetch(`${BASE_URL}/officer-files/${encodeURIComponent(staffNo)}`, { credentials: 'include' })
+        .then(response => {
+          if (!response.ok) throw new Error('Fetch failed: ' + response.status);
+          return response.json();
+        })
+        .then(files => {
+          console.log('Files from /officer-files:', files);
+          const validFiles = (files || []).filter(f => {
+            const fileId = f.id ?? f.fileId;
+            const isValid = f && fileId && !isNaN(parseInt(fileId));
+            if (!isValid) console.log('Filtered out file in viewOfficer:', f);
+            return isValid;
+          });
+          const filesHTML = validFiles.length 
+            ? validFiles
+                .map(f => {
+                  const fileId = f.id ?? f.fileId;
+                  console.log('Rendering file in viewOfficer with ID:', fileId);
+                  const isPdf = f.originalName && f.originalName.toLowerCase().endsWith('.pdf');
+                  const fileUrl = isPdf ? `${BASE_URL}/view-file/${fileId}` : `${BASE_URL}${escapeHtml(f.filePath)}`;
+                  return `
+                    <tr>
+                      <td>${escapeHtml(f.caseId)}</td>
+                      <td>
+                        <a href="${fileUrl}" rel="noopener noreferrer" onclick="event.preventDefault(); logFileView('${escapeHtml(f.filePath)}', '${escapeHtml(f.originalName || 'Unnamed File')}'); window.open('${fileUrl}', '_blank');">
+                          ${escapeHtml(f.originalName || 'Unnamed File')}
+                        </a>
+                      </td>
+                      <td>${escapeHtml(f.uploadedBy || 'N/A')}</td>
+                      <td>${formatDate(f.uploadDate)}</td>
+                    </tr>
+                  `;
+                }).join('')
+            : '<tr><td colspan="4">No files found for this officer</td></tr>';
+
+          const detailsHTML = `
+            <h3>Officer Profile: ${officer.name || 'Unknown'}</h3>
+            <p><strong>Staff No.:</strong> ${officer.staffNo || ''}</p>
+            <p><strong>Name:</strong> ${officer.name || ''}</p>
+            <p><strong>Joining Date:</strong> ${officer.joiningDate || ''}</p>
+            <p><strong>Years of Service:</strong> ${yearsOfService || 'N/A'}</p>
+            <p><strong>Rank:</strong> ${officer.rank || ''}</p>
+            <p><strong>Date of Birth:</strong> ${officer.dateOfBirth || ''}</p>
+            <p><strong>Age:</strong> ${age || 'N/A'}</p>
+            ${officer.photoPath ? `<p><strong>Photo:</strong> <img src="${officer.photoPath}" alt="Officer Photo" style="max-width: 200px;"></p>` : ''}
+            <h4>PSD History:</h4>
+            <div>${psdHistory}</div>
+            <h4>All Uploaded Files:</h4>
+            <table border="1">
+              <thead>
+                <tr>
+                  <th>Case ID</th>
+                  <th>File Name</th>
+                  <th>Uploaded By</th>
+                  <th>Upload Date</th>
+                </tr>
+              </thead>
+              <tbody>${filesHTML}</tbody>
+            </table>
+            <button onclick="backToOfficerProfiles(event)">Back to Officer Profiles</button>
+            <button onclick="openTab(event, 'cases')">Return to Cases</button>
+          `;
+          const detailsDiv = document.getElementById('officer-details');
+          detailsDiv.innerHTML = detailsHTML;
+          detailsDiv.style.display = 'block';
+          openTab({ currentTarget: document.querySelector('.tablink[onclick*="officer-profiles"]') }, 'officer-profiles', true);
+          const header = detailsDiv.querySelector('h3');
+          if (header) header.scrollIntoView({ behavior: 'smooth' });
+        })
+        .catch(error => {
+          console.error('Fetch officer files error:', error);
+          const detailsHTML = `
+            <h3>Officer Profile: ${officer.name || 'Unknown'}</h3>
+            <p><strong>Staff No.:</strong> ${officer.staffNo || ''}</p>
+            <p><strong>Name:</strong> ${officer.name || ''}</p>
+            <p><strong>Joining Date:</strong> ${officer.joiningDate || ''}</p>
+            <p><strong>Years of Service:</strong> ${yearsOfService || 'N/A'}</p>
+            <p><strong>Rank:</strong> ${officer.rank || ''}</p>
+            <p><strong>Date of Birth:</strong> ${officer.dateOfBirth || ''}</p>
+            <p><strong>Age:</strong> ${age || 'N/A'}</p>
+            ${officer.photoPath ? `<p><strong>Photo:</strong> <img src="${officer.photoPath}" alt="Officer Photo" style="max-width: 200px;"></p>` : ''}
+            <h4>PSD History:</h4>
+            <div>${psdHistory}</div>
+            <h4>All Uploaded Files:</h4>
+            <p>Error loading files: ${error.message}</p>
+            <button onclick="backToOfficerProfiles(event)">Back to Officer Profiles</button>
+            <button onclick="openTab(event, 'cases')">Return to Cases</button>
+          `;
+          const detailsDiv = document.getElementById('officer-details');
+          detailsDiv.innerHTML = detailsHTML;
+          detailsDiv.style.display = 'block';
+          openTab({ currentTarget: document.querySelector('.tablink[onclick*="officer-profiles"]') }, 'officer-profiles', true);
+          const header = detailsDiv.querySelector('h3');
+          if (header) header.scrollIntoView({ behavior: 'smooth' });
+        });
     })
     .catch(error => {
       console.error('View officer error:', error);
@@ -4641,6 +4817,47 @@ function resetDisclosureForm() {
     addOfficer(); // Add initial officer entry
   }
   document.getElementById('disclosure-result').innerText = '';
+}
+
+function loadAllFiles() {
+  fetch(`${BASE_URL}/files`, { credentials: 'include' })
+    .then(response => response.json())
+    .then(files => {
+      console.log('Files from /files:', files);
+      const validFiles = (files || []).filter(f => {
+        const fileId = f.id ?? f.fileId;
+        const isValid = f && fileId && !isNaN(parseInt(fileId));
+        if (!isValid) console.log('Filtered out file in loadAllFiles:', f);
+        return isValid;
+      });
+      const tableBody = document.querySelector('#all-files-table tbody');
+      tableBody.innerHTML = validFiles.length > 0
+        ? validFiles
+            .map(file => {
+              const fileId = file.id ?? file.fileId;
+              console.log('Rendering file in loadAllFiles with ID:', fileId);
+              const isPdf = file.originalName && file.originalName.toLowerCase().endsWith('.pdf');
+              const fileUrl = isPdf ? `${BASE_URL}/view-file/${fileId}` : `${BASE_URL}${escapeHtml(file.filePath || '#')}`;
+              return `
+                <tr>
+                  <td>${file.caseId}</td>
+                  <td>
+                    <a href="${fileUrl}" rel="noopener noreferrer" onclick="event.preventDefault(); logFileView('${escapeHtml(file.filePath || '#')}', '${escapeHtml(file.originalName || 'Unnamed File')}'); window.open('${fileUrl}', '_blank');">
+                      ${escapeHtml(file.originalName || 'Unnamed File')}
+                    </a>
+                  </td>
+                  <td>${file.staffNo || 'N/A'}</td>
+                  <td>${file.uploadedBy}</td>
+                  <td>${formatDate(file.uploadDate)}</td>
+                </tr>
+              `;
+            }).join('')
+        : '<tr><td colspan="5">No files found</td></tr>';
+    })
+    .catch(error => {
+      console.error('Load files error:', error);
+      alert('Failed to load files: ' + error.message);
+    });
 }
 
 function generateDisclosureReport() {
@@ -4940,6 +5157,6 @@ function openAdminTab(evt, tabName) {
 <button class="error-report-btn" onclick="showErrorModal()">Report Error</button>
 </body>
 <footer>
-  <p id="copyright" style="text-align: center;">© <span id="year"></span> Nathan Victory. All rights reserved.</p>
+  <p id="copyright" style="text-align: center;">© <span id="year"></span> POLARIS RMS Version 1. All rights reserved.</p>
 </footer>
 </html>

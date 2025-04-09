@@ -13,6 +13,7 @@
     "jszip-utils": "^0.1.0",
     "multer": "^1.4.5-lts.1",
     "multer-storage-cloudinary": "^4.0.0",
+    "node-fetch": "^2.7.0",
     "nodemailer": "^6.10.0",
     "pizzip": "^3.1.8",
     "redis": "^4.6.5",
@@ -21,5 +22,16 @@
     "sqlite": "^5.1.1",
     "sqlite3": "^5.1.7",
     "winston": "^3.17.0"
-  }
+  },
+  "name": "polaris---copy---copy",
+  "version": "1.0.0",
+  "main": "cases.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "start": "node server.js"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "description": ""
 }
